@@ -5,30 +5,31 @@ import webbrowser
 
 def run_command(cmd):
     print(f"执行: {cmd}")
-    result = subprocess.run(cmd, shell=True)
+    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    print(result.stdout)
     if result.returncode != 0:
-        print(f"警告: 命令执行有问题，但继续...")
+        print(f"警告: 命令执行失败 ({result.stderr.strip()})，但尝试继续...")
     print()
 
-def install_scoop():
-    print("正在安装 Scoop 包管理器（用户级，无需管理员权限）...")
-    scoop_check = subprocess.run("scoop --version", shell=True)
-    if scoop_check.returncode == 0:
-        print("Scoop 已安装，正在更新...")
-        run_command("scoop update")
-    else:
-        print("首次安装 Scoop...")
-        # 允许 PowerShell 执行脚本
-        subprocess.run("powershell -Command \"Set-ExecutionPolicy RemoteSigned -Scope CurrentUser\"", shell=True)
-        subprocess.run("powershell -Command \"irm get.scoop.sh | iex\"", shell=True)
-        print("Scoop 安装完成！请关闭窗口重新运行本脚本以刷新环境变量。")
-        input("按 Enter 退出...")
-        sys.exit(0)
-
 def install_hugo():
-    print("\n=== 正在安装 Hugo (最新 extended 版 v0.152.2) ===")
-    install_scoop()
-    run_command("scoop install hugo-extended")
+    print("\n=== 正在安装 Hugo (最新 extended 版) ===")
+    print("使用 Microsoft 官方 winget 包管理器安装（最简单、无需额外工具）")
+    
+    # 检查 winget 是否可用
+    winget_check = subprocess.run("winget --version", shell=True, capture_output=True)
+    if winget_check.returncode != 0:
+        print("未检测到 winget！winget 是 Windows 10/11 内置包管理器。")
+        print("解决方案：")
+        print("1. 打开 Microsoft Store，搜索 'App Installer' 并更新（winget 随它附带）。")
+        print("2. 或手动从 GitHub 下载最新版：https://github.com/microsoft/winget-cli/releases")
+        confirm = input("现在打开 Microsoft Store？(y/n，默认 y): ").strip().lower()
+        if confirm != 'n':
+            webbrowser.open("ms-windows-store://pdp/?productid=9NBLGGH4NNS1")
+        print("更新完成后重新运行本脚本。")
+        return
+    
+    # 安装 Hugo extended
+    run_command("winget install --id Hugo.Hugo.Extended -e")
     print("Hugo 安装完成！")
     run_command("hugo version")
 
@@ -69,14 +70,13 @@ def install_hexo():
 
 def main():
     print("=" * 70)
-    print("      Windows 一键安装 Hugo / Hexo 静态站点生成器")
+    print("      Windows 一键安装 Hugo / Hexo 静态站点生成器（winget 版）")
     print("=" * 70)
     print("当前日期: 2025 年 12 月 16 日")
     print("本脚本功能：")
     print("  - 选择安装 Hugo（最快 SSG）或 Hexo（Node.js 博客框架）或两者")
-    print("  - Hugo: 最新 extended v0.152.2 (用 Scoop 安装)")
+    print("  - Hugo: 最新 extended 版 (用 Microsoft winget 安装，最简单)")
     print("  - Hexo: 最新 v8.1.0 (需先安装 Node.js LTS v24.x)")
-    print("  - 自动处理 Scoop 和 npm")
     print("")
     print("适用系统: Windows 10 / 11 (64 位)")
     print("为什么在 Windows 开发：")
@@ -84,9 +84,9 @@ def main():
     print("  - 部署时用 GitHub Actions / Gitea Actions 自动构建")
     print("")
     print("注意事项：")
-    print("  - 推荐以管理员身份运行")
-    print("  - 如果首次安装 Scoop，需要关闭窗口重启脚本")
-    print("  - Node.js 请手动从官网下载安装（脚本会自动打开链接）")
+    print("  - winget 在大多数 Windows 10/11 已内置")
+    print("  - 如果 winget 未找到，脚本会引导更新 App Installer")
+    print("  - Node.js 请手动从官网下载安装")
     print("=" * 70)
 
     choice = input("\n选择安装：1=Hugo, 2=Hexo, 3=两者 (默认 3): ").strip() or "3"
