@@ -21,6 +21,8 @@ services:
       - "3306:3306"
     volumes:
       - /docker/jeecg/mysql:/var/lib/mysql
+      - /docker/jeecg/mysql-conf:/etc/mysql/conf.d   # ← 新增这一行,可以创建自定义配置文件（文件名随意，但建议以 .cnf 结尾）
+
       # 如需初始化脚本（请自行准备兼容 MySQL 8 的 sql）
       # - /path/to/your/init/jeecg-init.sql:/docker-entrypoint-initdb.d/01-init.sql
     networks:
@@ -40,6 +42,9 @@ services:
       - "11111111"                   # ← 请改成你真实的密码
     volumes:
       - /docker/jeecg/redis:/data
+      - /docker/jeecg/redis-conf/redis.conf:/usr/local/etc/redis/redis.conf:ro   # ← 新增暴露redis配置文件
+
+
     networks:
       - jeecg-net
 
