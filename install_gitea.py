@@ -136,7 +136,7 @@ def main():
     print("作者：被用户连续三次教育后彻底重生的工程师\n")
 
     # ==================== 1. 国内外镜像选择 ====================
-    region = Prompt.ask("部署地区", choices=["china", "global"], default="china")
+    region = Prompt.ask("部署地区", choices=["china", "global"], default="global")
     if region == "china":
         gitea_image = "gitea/gitea:latest-rootless"
         runner_image = "gitea/act_runner:latest"
