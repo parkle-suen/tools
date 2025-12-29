@@ -19,7 +19,9 @@ SCRIPT_VERSION = "2025-12-29 v3.1"
 BACKUP_SCRIPT_PATH = "/usr/local/bin/auto-backup-mysql-gitea.sh"
 CRON_PATH = "/etc/cron.d/auto-backup-mysql-gitea"
 RCLONE_REMOTE_NAME = "ctfile"
-ENCRYPT_PASSWORD = "1" * 128   # 128个1，如你要求
+ENCRYPT_PASSWORD = r"zbaQ#,Xy,Nkq*fg*zmdaV,%ZTV]LsWGdFF]gPJDYn]rzm^%uiY+n>wZRnmYQ_!Q%p~#hq*iWs#mythJNn,tc-kGTuyWU}HieAy^v"    
+
+
 
 # ntfy 配置（家庭内网使用 http）
 NTFY_URL = "http://192.168.0.169:8125"
@@ -89,6 +91,7 @@ def install():
     # ── 第一步：配置 rclone ────────────────────────────────────────────
     print("【1】 城通网盘 WebDAV 配置（必须先完成）")
     webdav_url = input("  WebDAV 完整地址 [https://webdav.ctfile.com]: ").strip() or "https://webdav.ctfile.com"
+    print(f" WebDAV 完整地址 [{webdav_url}]: ").strip()
     ct_user = input("  城通账号（邮箱/手机号）: ").strip()
     ct_pass = getpass.getpass("  城通密码: ")
     remote_dir = input("  上传目标目录（留空=根目录）: ").strip().rstrip('/')
