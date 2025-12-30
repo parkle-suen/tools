@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gitea + Act Runner 2025 终极一键部署脚本（v2.3 永不翻车版）
-修复：
-• pip 检测彻底健壮（不再误判，不再使用冲突参数）
-• 即使 apt 源临时问题也不会强制 apt update
-• 在 Ubuntu 20.04/22.04/24.04 多台纯净机反复验证通过
+Gitea + Act Runner 2025 终极一键部署脚本（v2.4 网络处理更稳健版）
+改动重点（针对分开安装场景）：
+• 不再自动猜网络名和容器名（太不可靠）
+• 分开安装时询问是否要加入同一个网络
+• 让用户主动提供网络名称 + 容器内 Gitea 地址
+• 提供清晰指引和二次确认
+• 其他部分尽量保持原样
 """
 
 import os
@@ -46,7 +48,6 @@ if not check_pip_installed():
 print("\033[93m正在升级 pip...\033[0m")
 subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "pip"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-# 检查并安装 rich
 try:
     import rich
     print("\033[92mrich 已安装\033[0m")
@@ -102,11 +103,11 @@ def upgrade_runner():
             run("docker rm gitea-runner || true")
             run("docker pull gitea/act_runner:latest")
 
-            # 使用脚本安装的 Gitea 的网络
-            network_cmd = "--network gitea_gitea"
+            # 升级时也尽可能复用用户上次的选择，但这里简化处理
+            network_cmd = "--network host"
+            gitea_url_internal = Prompt.ask("Gitea 实例 URL（容器内用内部地址更好，外部也行）", default="http://localhost:3000/")
+            if not gitea_url_internal.endswith('/'): gitea_url_internal += '/'
 
-            gitea_url = Prompt.ask("Gitea 实例 URL（带 http/https 和结尾 /）", default="http://localhost:3000/")
-            if not gitea_url.endswith('/'): gitea_url += '/'
             runner_name = Prompt.ask("Runner 名称", default="prod-runner-01")
             token = Prompt.ask("Registration Token（去 Gitea 后台重新生成一个）")
             labels = "ubuntu-latest:docker://docker.gitea.com/runner-images:ubuntu-latest,ubuntu-24.04:docker://docker.gitea.com/runner-images:ubuntu-24.04,ubuntu-22.04:docker://docker.gitea.com/runner-images:ubuntu-22.04,native:host"
@@ -116,7 +117,7 @@ docker run -d \\
   --name gitea-runner \\
   --restart unless-stopped \\
   {network_cmd} \\
-  -e GITEA_INSTANCE_URL="{gitea_url}" \\
+  -e GITEA_INSTANCE_URL="{gitea_url_internal}" \\
   -e GITEA_RUNNER_REGISTRATION_TOKEN="{token}" \\
   -e GITEA_RUNNER_NAME="{runner_name}" \\
   -e GITEA_RUNNER_LABELS="{labels}" \\
@@ -134,7 +135,7 @@ def main():
         console.print("[bold red]错误：请使用 sudo 或 root 权限运行此脚本[/]")
         sys.exit(1)
 
-    console.rule("[bold magenta]Gitea + Act Runner 2025 终极一键部署脚本 v2.3（永不翻车版）[/]")
+    console.rule("[bold magenta]Gitea + Act Runner 2025 终极一键部署脚本 v2.4（网络处理更稳健版）[/]")
     print("作者：被用户连续三次教育后彻底重生的工程师\n")
 
     # ==================== 1. 国内外镜像选择 ====================
@@ -234,7 +235,7 @@ services:
         ))
         input("\n安装向导完成后，按回车继续配置 Runner...")
     else:
-        gitea_url = Prompt.ask("请输入现有 Gitea 的完整 URL（带 http/https 和结尾 /）")
+        gitea_url = Prompt.ask("请输入现有 Gitea 的**外部**访问 URL（用于提示和 token 获取）", default="http://localhost:3000/")
         if not gitea_url.endswith('/'):
             gitea_url += '/'
 
@@ -260,18 +261,51 @@ services:
         console.print("2. 点击 [Create runner] → 复制 Token\n")
         token = Prompt.ask("粘贴 Registration Token")
 
-        # 确定网络配置
-        if not has_gitea:
-            # 脚本安装的 Gitea，使用相同的网络
-            network_cmd = "--network gitea_gitea"
-            # 修改 URL 为容器内访问地址
-            runner_gitea_url = "http://gitea:3000/"
-        else:
-            # 外部 Gitea，使用 host 网络
-            network_cmd = "--network host"
-            runner_gitea_url = gitea_url
+        # ── 关键改动：网络处理 ───────────────────────────────
+        use_same_network = Confirm.ask(
+            "\n[bold]是否让 Runner 加入 Gitea 所在的同一个 docker network？[/]\n"
+            "(推荐：最稳定，推荐选是)",
+            default=True
+        )
 
-        console.print(f"正在启动 Act Runner（连接到 Gitea 容器网络）...")
+        if use_same_network:
+            console.print("\n[bold cyan]如何找到网络名称？[/]")
+            console.print("执行以下命令之一即可看到 Gitea 所在的网络：")
+            console.print("  docker network ls")
+            console.print("  docker inspect gitea | grep Network")
+            console.print("  docker inspect -f '{{json .NetworkSettings.Networks}}' gitea\n")
+
+            network_name = Prompt.ask(
+                "请输入 Gitea 容器所在的 docker network 名称",
+                default="gitea_gitea"
+            )
+
+            internal_url_default = "http://gitea:3000/"
+            console.print(f"\n默认使用容器名 'gitea'，内部地址为 {internal_url_default}")
+            runner_gitea_url = Prompt.ask(
+                "请输入 Runner 容器内访问 Gitea 的完整 URL\n"
+                "(通常是 http://容器名:3000/，如容器名不是 gitea 请修改)",
+                default=internal_url_default
+            )
+
+            network_cmd = f"--network {network_name}"
+            console.print(f"\n[green]将使用网络：{network_name}[/]")
+            console.print(f"[green]Gitea 内部地址：{runner_gitea_url}[/]\n")
+        else:
+            console.print("\n[yellow]使用 host 网络模式[/]")
+            console.print("[yellow]注意：请确保 Runner 能通过网络直接访问你填的 Gitea 外部地址[/]")
+            runner_gitea_url = Prompt.ask(
+                "请输入 Runner 能访问到的 Gitea 完整 URL",
+                default=gitea_url
+            )
+            network_cmd = "--network host"
+
+        # ── 二次确认 ───────────────────────────────────────────
+        if not Confirm.ask(f"\n确认配置？\n网络: {network_cmd}\nGitea URL: {runner_gitea_url}", default=True):
+            console.print("[yellow]已取消，请重新运行脚本[/]")
+            return
+
+        console.print("正在启动 Act Runner...")
         run(f"""
 docker run -d \\
   --name gitea-runner \\
@@ -306,7 +340,7 @@ docker run -d \\
     table = Table(title="Gitea + Runner 完整配置信息")
     table.add_column("项目", style="cyan")
     table.add_column("值", style="green")
-    table.add_row("Gitea 访问地址", gitea_url)
+    table.add_row("Gitea 访问地址（外部）", gitea_url)
     table.add_row("管理员推荐密码", "11111111")
     table.add_row("数据库密码", db_password)
     table.add_row("Runner 名称", runner_name if 'runner_name' in locals() else "N/A")
@@ -319,7 +353,8 @@ docker run -d \\
 
     console.print(Panel(
         "[bold green]大功告成！[/]\n"
-        "后续升级 Runner：重新运行本脚本 → 选择升级即可",
+        "后续升级 Runner：重新运行本脚本 → 选择升级即可\n"
+        "网络问题请查看 docker logs gitea-runner",
         title="部署成功"
     ))
 
