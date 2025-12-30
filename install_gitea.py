@@ -101,20 +101,21 @@ def upgrade_runner():
             run("docker stop gitea-runner || true")
             run("docker rm gitea-runner || true")
             run("docker pull gitea/act_runner:latest")
-            run("docker network create gitea-net 2>/dev/null || true")
 
-            labels = "ubuntu-latest:docker://docker.gitea.com/runner-images:ubuntu-latest,ubuntu-24.04:docker://docker.gitea.com/runner-images:ubuntu-24.04,ubuntu-22.04:docker://docker.gitea.com/runner-images:ubuntu-22.04,native:host"
+            # 使用脚本安装的 Gitea 的网络
+            network_cmd = "--network gitea_gitea"
 
             gitea_url = Prompt.ask("Gitea 实例 URL（带 http/https 和结尾 /）", default="http://localhost:3000/")
             if not gitea_url.endswith('/'): gitea_url += '/'
             runner_name = Prompt.ask("Runner 名称", default="prod-runner-01")
             token = Prompt.ask("Registration Token（去 Gitea 后台重新生成一个）")
+            labels = "ubuntu-latest:docker://docker.gitea.com/runner-images:ubuntu-latest,ubuntu-24.04:docker://docker.gitea.com/runner-images:ubuntu-24.04,ubuntu-22.04:docker://docker.gitea.com/runner-images:ubuntu-22.04,native:host"
 
             run(f"""
 docker run -d \\
   --name gitea-runner \\
   --restart unless-stopped \\
-  --network gitea-net \\
+  {network_cmd} \\
   -e GITEA_INSTANCE_URL="{gitea_url}" \\
   -e GITEA_RUNNER_REGISTRATION_TOKEN="{token}" \\
   -e GITEA_RUNNER_NAME="{runner_name}" \\
@@ -126,6 +127,7 @@ docker run -d \\
 """.strip())
             p.update(t, completed=True)
         console.print(Panel("[bold green]Runner 升级完成！新镜像已拉取，配置已恢复[/]", title="升级成功"))
+
 
 def main():
     if os.geteuid() != 0:
@@ -244,10 +246,7 @@ services:
                 upgrade_runner()
                 return
 
-        console.print(Panel("Act Runner 支持以下能力（2025 最新预置标签）:\n"
-                           "• ubuntu-latest / ubuntu-24.04 / ubuntu-22.04（全工具镜像）\n"
-                           "• 原生执行（native:host）\n"
-                           "• Java / Flutter / Node / Python / Go 等全语言支持", title="Runner 能力一览", style="bold blue"))
+        console.print(Panel("Act Runner 支持以下能力（2025 最新预置标签）:", title="Runner 能力一览", style="bold blue"))
 
         runner_dir = Path("/data/gitea_runner")
         runner_dir.mkdir(parents=True, exist_ok=True)
@@ -261,14 +260,24 @@ services:
         console.print("2. 点击 [Create runner] → 复制 Token\n")
         token = Prompt.ask("粘贴 Registration Token")
 
-        console.print("正在启动 Act Runner（bridge 网络 + 2025 最新 labels）...")
+        # 确定网络配置
+        if not has_gitea:
+            # 脚本安装的 Gitea，使用相同的网络
+            network_cmd = "--network gitea_gitea"
+            # 修改 URL 为容器内访问地址
+            runner_gitea_url = "http://gitea:3000/"
+        else:
+            # 外部 Gitea，使用 host 网络
+            network_cmd = "--network host"
+            runner_gitea_url = gitea_url
+
+        console.print(f"正在启动 Act Runner（连接到 Gitea 容器网络）...")
         run(f"""
-docker network create gitea-net 2>/dev/null || true
 docker run -d \\
   --name gitea-runner \\
   --restart unless-stopped \\
-  --network gitea-net \\
-  -e GITEA_INSTANCE_URL="{gitea_url}" \\
+  {network_cmd} \\
+  -e GITEA_INSTANCE_URL="{runner_gitea_url}" \\
   -e GITEA_RUNNER_REGISTRATION_TOKEN="{token}" \\
   -e GITEA_RUNNER_NAME="{runner_name}" \\
   -e GITEA_RUNNER_LABELS="{runner_labels}" \\
