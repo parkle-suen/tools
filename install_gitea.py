@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gitea + Act Runner 2025 终极一键部署脚本（v2.4 网络处理更稳健版）
-改动重点（针对分开安装场景）：
-• 不再自动猜网络名和容器名（太不可靠）
-• 分开安装时询问是否要加入同一个网络
-• 让用户主动提供网络名称 + 容器内 Gitea 地址
-• 提供清晰指引和二次确认
-• 其他部分尽量保持原样
+Gitea + Act Runner 2025 终极一键部署脚本（v2.5 开发友好版 - 默认 bridge + pg 暴露端口）
+改动重点：
+• 网络部分全部注释掉 → 默认使用 bridge 网络（开发环境最友好）
+• PostgreSQL 暴露端口 5433:5432（宿主机可直接连 pgAdmin 等）
+• 数据库连接地址改为容器名 gitea-postgres:5432
+• 保留 networks 定义但注释，方便以后切换回自定义网络
+• 其他部分保持原样，增加提示语
 """
 
 import os
@@ -22,7 +22,6 @@ from pathlib import Path
 print("\033[93m检查 Python 环境和依赖...\033[0m")
 
 def check_pip_installed():
-    """最健壮的 pip 检查方式"""
     for cmd in ["pip3", "pip"]:
         result = subprocess.run(
             [cmd, "--version"],
@@ -44,7 +43,6 @@ if not check_pip_installed():
         print("\033[91m安装 python3-pip 失败，请手动修复 apt 源后重试\033[0m")
         sys.exit(1)
 
-# 升级 pip
 print("\033[93m正在升级 pip...\033[0m")
 subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "pip"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -103,9 +101,9 @@ def upgrade_runner():
             run("docker rm gitea-runner || true")
             run("docker pull gitea/act_runner:latest")
 
-            # 升级时也尽可能复用用户上次的选择，但这里简化处理
-            network_cmd = "--network host"
-            gitea_url_internal = Prompt.ask("Gitea 实例 URL（容器内用内部地址更好，外部也行）", default="http://localhost:3000/")
+            # 开发环境推荐使用容器名地址
+            network_cmd = ""  # 默认 bridge，不需要指定 --network
+            gitea_url_internal = Prompt.ask("Gitea 实例 URL（开发环境推荐容器名）", default="http://gitea:3000/")
             if not gitea_url_internal.endswith('/'): gitea_url_internal += '/'
 
             runner_name = Prompt.ask("Runner 名称", default="prod-runner-01")
@@ -129,13 +127,12 @@ docker run -d \\
             p.update(t, completed=True)
         console.print(Panel("[bold green]Runner 升级完成！新镜像已拉取，配置已恢复[/]", title="升级成功"))
 
-
 def main():
     if os.geteuid() != 0:
         console.print("[bold red]错误：请使用 sudo 或 root 权限运行此脚本[/]")
         sys.exit(1)
 
-    console.rule("[bold magenta]Gitea + Act Runner 2025 终极一键部署脚本 v2.4（网络处理更稳健版）[/]")
+    console.rule("[bold magenta]Gitea + Act Runner 2025 终极一键部署脚本 v2.5（开发友好版 - 默认 bridge）[/]")
     print("作者：被用户连续三次教育后彻底重生的工程师\n")
 
     # ==================== 1. 国内外镜像选择 ====================
@@ -164,13 +161,13 @@ def main():
         if not gitea_url.endswith('/'):
             gitea_url += '/'
 
-        console.print(Panel("开始部署全新 Gitea（含 PostgreSQL）", style="bold green"))
+        console.print(Panel("开始部署全新 Gitea（含 PostgreSQL，默认使用 bridge 网络）", style="bold green"))
 
         compose_content = f'''version: "3.8"
 
-networks:
-  gitea:
-    external: false
+# networks:                     # ← 全部注释掉，使用默认 bridge 网络（开发环境最友好）
+#   gitea:
+#     external: false
 
 services:
   server:
@@ -181,7 +178,7 @@ services:
       - USER_UID=1000
       - USER_GID=1000
       - GITEA__database__DB_TYPE=postgres
-      - GITEA__database__HOST=db:5432
+      - GITEA__database__HOST=gitea-postgres:5432   # ← 改成容器名:端口（bridge 网络下可靠）
       - GITEA__database__NAME=gitea
       - GITEA__database__USER=gitea
       - GITEA__database__PASSWD={db_password}
@@ -196,8 +193,8 @@ services:
       - "2222:22"
     depends_on:
       - db
-    networks:
-      - gitea
+    # networks:                   # ← 注释掉
+    #   - gitea
 
   db:
     image: postgres:15-alpine
@@ -209,8 +206,10 @@ services:
       - POSTGRES_DB=gitea
     volumes:
       - /data/gitea/postgres:/var/lib/postgresql/data
-    networks:
-      - gitea
+    ports:
+      - "5433:5432"               # ← 新增：宿主机 5433 → 容器 5432（开发环境可外部连接 pgAdmin 等）
+    # networks:                   # ← 注释掉
+    #   - gitea
 '''
 
         Path("/data/gitea").mkdir(parents=True, exist_ok=True)
@@ -230,7 +229,8 @@ services:
         console.print(Panel(
             f"请访问 [bold cyan]{gitea_url}[/] 完成首次安装向导\n"
             f"管理员账号建议：admin / 11111111\n"
-            f"[bold red]务必把 Site URL 填写为：{gitea_url}[/]",
+            f"[bold red]务必把 Site URL 填写为：{gitea_url}[/]\n\n"
+            f"[bold cyan]开发提示：PostgreSQL 可从宿主机连接：localhost:5433 / 用户 gitea / 密码 11111111[/]",
             title="Gitea 部署完成", style="bold green"
         ))
         input("\n安装向导完成后，按回车继续配置 Runner...")
@@ -261,52 +261,30 @@ services:
         console.print("2. 点击 [Create runner] → 复制 Token\n")
         token = Prompt.ask("粘贴 Registration Token")
 
-        # ── 关键改动：网络处理 ───────────────────────────────
+        # 开发环境默认 bridge，推荐容器名地址
         use_same_network = Confirm.ask(
-            "\n[bold]是否让 Runner 加入 Gitea 所在的同一个 docker network？[/]\n"
-            "(推荐：最稳定，推荐选是)",
-            default=True
+            "\n[bold]是否让 Runner 加入 Gitea 同一网络？（默认 bridge 推荐直接用容器名访问）[/]",
+            default=False
         )
 
         if use_same_network:
-            console.print("\n[bold cyan]如何找到网络名称？[/]")
-            console.print("执行以下命令之一即可看到 Gitea 所在的网络：")
-            console.print("  docker network ls")
-            console.print("  docker inspect gitea | grep Network")
-            console.print("  docker inspect -f '{{json .NetworkSettings.Networks}}' gitea\n")
-
-            network_name = Prompt.ask(
-                "请输入 Gitea 容器所在的 docker network 名称",
-                default="gitea_gitea"
-            )
-
-            internal_url_default = "http://gitea:3000/"
-            console.print(f"\n默认使用容器名 'gitea'，内部地址为 {internal_url_default}")
-            runner_gitea_url = Prompt.ask(
-                "请输入 Runner 容器内访问 Gitea 的完整 URL\n"
-                "(通常是 http://容器名:3000/，如容器名不是 gitea 请修改)",
-                default=internal_url_default
-            )
-
-            network_cmd = f"--network {network_name}"
-            console.print(f"\n[green]将使用网络：{network_name}[/]")
-            console.print(f"[green]Gitea 内部地址：{runner_gitea_url}[/]\n")
+            console.print("\n[bold cyan]当前已使用默认 bridge 网络，推荐直接用容器名访问[/]")
+            runner_gitea_url = Prompt.ask("Runner 容器内访问 Gitea 的完整 URL", default="http://gitea:3000/")
+            network_cmd = ""  # 默认 bridge 不需要指定
         else:
-            console.print("\n[yellow]使用 host 网络模式[/]")
-            console.print("[yellow]注意：请确保 Runner 能通过网络直接访问你填的 Gitea 外部地址[/]")
+            console.print("\n[yellow]使用默认 bridge 网络（无需指定 --network）[/]")
             runner_gitea_url = Prompt.ask(
-                "请输入 Runner 能访问到的 Gitea 完整 URL",
-                default=gitea_url
+                "请输入 Runner 能访问到的 Gitea 完整 URL（开发环境推荐容器名）",
+                default="http://gitea:3000/"
             )
-            network_cmd = "--network host"
+            network_cmd = ""
 
-        # ── 二次确认 ───────────────────────────────────────────
-        if not Confirm.ask(f"\n确认配置？\n网络: {network_cmd}\nGitea URL: {runner_gitea_url}", default=True):
+        if not Confirm.ask(f"\n确认配置？\n网络: 默认 bridge\nGitea URL: {runner_gitea_url}", default=True):
             console.print("[yellow]已取消，请重新运行脚本[/]")
             return
 
         console.print("正在启动 Act Runner...")
-        run(f"""
+        cmd = f"""
 docker run -d \\
   --name gitea-runner \\
   --restart unless-stopped \\
@@ -319,7 +297,8 @@ docker run -d \\
   -v /data/gitea_runner/cache:/cache \\
   -v /var/run/docker.sock:/var/run/docker.sock \\
   {runner_image}
-""".strip())
+""".strip()
+        run(cmd)
 
         console.print("等待 Runner 注册完成...")
         time.sleep(10)
@@ -343,6 +322,7 @@ docker run -d \\
     table.add_row("Gitea 访问地址（外部）", gitea_url)
     table.add_row("管理员推荐密码", "11111111")
     table.add_row("数据库密码", db_password)
+    table.add_row("PostgreSQL 外部连接", "localhost:5433 / 用户 gitea / 密码 11111111 / 数据库 gitea")
     table.add_row("Runner 名称", runner_name if 'runner_name' in locals() else "N/A")
     table.add_row("Runner 状态", runner_status)
     table.add_row("Runner Labels", runner_labels if 'runner_labels' in locals() else "默认")
@@ -354,7 +334,8 @@ docker run -d \\
     console.print(Panel(
         "[bold green]大功告成！[/]\n"
         "后续升级 Runner：重新运行本脚本 → 选择升级即可\n"
-        "网络问题请查看 docker logs gitea-runner",
+        "网络问题请查看 docker logs gitea-runner\n"
+        "开发提示：所有服务默认使用 bridge 网络，互相用容器名访问",
         title="部署成功"
     ))
 
