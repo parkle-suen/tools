@@ -93,17 +93,25 @@ dockerfile_path = temp_dir / "Dockerfile"
 
 dockerfile_content = f"""FROM ghcr.io/catthehacker/ubuntu:act-latest
 
-# 补齐 Flutter 依赖（act-latest 已有很多）
+# 修复 GnuTLS TLS 问题：切换到 OpenSSL + 更新证书
+RUN apt-get update && apt-get install -y \\
+    ca-certificates curl git libcurl4-openssl-dev \\
+    && update-ca-certificates \\
+    && git config --global http.sslVersion tlsv1.2 \\
+    && rm -rf /var/lib/apt/lists/*
+
+# 安装 Flutter 额外依赖
 RUN apt-get update && apt-get install -y \\
     clang cmake ninja-build pkg-config \\
     libgtk-3-dev liblzma-dev \\
     && rm -rf /var/lib/apt/lists/*
 
-# 安装 Flutter
+# 安装 Flutter（加 --verbose 看进度，--depth 1 浅克隆）
 ARG FLUTTER_CHANNEL={channel}
 ARG FLUTTER_VERSION={version}
 ENV FLUTTER_HOME=/opt/flutter
-RUN git clone https://github.com/flutter/flutter.git -b ${{FLUTTER_CHANNEL}} --depth 1 ${{FLUTTER_HOME}} && \\
+RUN git config --global http.postBuffer 524288000 \\  # 增大 buffer 防中断
+    && git clone --verbose https://github.com/flutter/flutter.git -b ${{FLUTTER_CHANNEL}} --depth 1 ${{FLUTTER_HOME}} && \\
     cd ${{FLUTTER_HOME}} && \\
     if [ "${{FLUTTER_VERSION}}" != "latest" ]; then \\
         git fetch --depth 1 origin tag ${{FLUTTER_VERSION}} && \\
