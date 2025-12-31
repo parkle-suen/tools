@@ -67,7 +67,7 @@ console.print(f"[green]已选择：{source_choice}[/]")
 
 local_flutter_path = None
 channel = "stable"
-version = "3.38.5"  # 默认版本
+version = "3.35.7"  # 默认版本
 
 if source_choice == "本地目录":
     local_flutter_path = Prompt.ask(
@@ -87,7 +87,7 @@ elif source_choice == "远程 git clone":
     console.print(f"[green]将 git clone {channel}/{version}[/]")
 
 else:  # 官方 tar.xz 下载
-    version_input = Prompt.ask(f"Flutter 版本号（如 3.38.5，留空用默认 {version})", default="")
+    version_input = Prompt.ask(f"Flutter 版本号（如 3.35.7，留空用默认 {version})", default="")
     version = version_input if version_input else version
     console.print(f"[green]将自动下载官方 tar.xz：Flutter {version} stable[/]")
 
