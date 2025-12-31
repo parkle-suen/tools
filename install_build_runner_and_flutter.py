@@ -110,7 +110,7 @@ RUN apt-get update && apt-get install -y \\
 ARG FLUTTER_CHANNEL={channel}
 ARG FLUTTER_VERSION={version}
 ENV FLUTTER_HOME=/opt/flutter
-RUN git config --global http.postBuffer 524288000 \\  # 增大 buffer 防中断
+RUN git config --global http.postBuffer 524288000 \\
     && git clone --verbose https://github.com/flutter/flutter.git -b ${{FLUTTER_CHANNEL}} --depth 1 ${{FLUTTER_HOME}} && \\
     cd ${{FLUTTER_HOME}} && \\
     if [ "${{FLUTTER_VERSION}}" != "latest" ]; then \\
