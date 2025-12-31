@@ -44,12 +44,11 @@ console.print(Panel(
     "1. 本地目录：已下载解压好的 Flutter 目录（最快）\n"
     "2. 远程 git clone：从 GitHub 下载（网络需稳定）\n"
     "3. 官方 tar.xz 下载：脚本自动下载稳定版 zip 包（推荐！避开 git 坑）\n\n"
-    "官方下载示例链接：https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.24.3-stable.tar.xz\n"
-    "输入版本号（如 3.24.3），脚本自动构造链接下载",
+    "官方下载示例链接：https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.38.5-stable.tar.xz",
     title="获取方式说明", style="bold cyan"
 ))
 
-# 1. 选择 Flutter 来源
+# 1. 选择 Flutter 来源（数字选择）
 console.print("[bold cyan]请选择 Flutter 获取方式（输入数字）：[/]")
 console.print("1. 本地目录（已下载解压好的 Flutter SDK）")
 console.print("2. 远程 git clone（从 GitHub 下载）")
@@ -68,7 +67,7 @@ console.print(f"[green]已选择：{source_choice}[/]")
 
 local_flutter_path = None
 channel = "stable"
-version = "latest"
+version = "3.38.5"  # 默认版本
 
 if source_choice == "本地目录":
     local_flutter_path = Prompt.ask(
@@ -83,17 +82,13 @@ if source_choice == "本地目录":
 
 elif source_choice == "远程 git clone":
     channel = Prompt.ask("Flutter 频道", choices=["stable", "beta", "master"], default="stable")
-    version_input = Prompt.ask(f"具体版本（留空用最新）", default="")
-    version = version_input if version_input else "latest"
+    version_input = Prompt.ask(f"具体版本（留空用默认 {version})", default="")
+    version = version_input if version_input else version
     console.print(f"[green]将 git clone {channel}/{version}[/]")
 
 else:  # 官方 tar.xz 下载
-    version = Prompt.ask(
-        "Flutter 版本号（如 3.24.3，留空用最新稳定版）",
-        default=""
-    )
-    if not version:
-        version = "latest"
+    version_input = Prompt.ask(f"Flutter 版本号（如 3.38.5，留空用默认 {version})", default="")
+    version = version_input if version_input else version
     console.print(f"[green]将自动下载官方 tar.xz：Flutter {version} stable[/]")
 
 image_name = Prompt.ask("最终镜像名称", default=f"my-act-flutter:{channel}")
@@ -110,6 +105,8 @@ if not Confirm.ask("确认开始构建？", default=True):
 
 # 临时构建目录
 temp_dir = Path("/tmp/flutter_act_builder")
+if temp_dir.exists():
+    run(f"rm -rf {temp_dir}")
 temp_dir.mkdir(parents=True, exist_ok=True)
 dockerfile_path = temp_dir / "Dockerfile"
 
@@ -120,20 +117,23 @@ if source_choice == "本地目录":
     run(f"cp -r {local_flutter_path} {flutter_copy_dest}")
 
 elif source_choice == "官方 tar.xz 下载":
-    console.print("[cyan]下载官方 Flutter tar.xz...（视网络情况）[/]")
-    if version == "latest":
-        # 最新稳定版链接（需要先查最新版本号，这里简化用一个示例，实际可动态获取）
-        console.print("[yellow]最新版链接需手动确认，建议指定版本号[/]")
-        download_url = Prompt.ask("请输入完整 tar.xz 下载链接", default="https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.24.3-stable.tar.xz")
-    else:
-        download_url = f"https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_{version}-stable.tar.xz"
+    console.print("[cyan]检查是否已有 Flutter tar.xz...[/]")
+    tar_filename = f"flutter_linux_{version}-stable.tar.xz"
+    tar_file = temp_dir / tar_filename
 
-    tar_file = temp_dir / f"flutter_{version}.tar.xz"
-    run(f"wget -O {tar_file} {download_url}")
+    if tar_file.exists():
+        console.print(f"[green]检测到已下载的 {tar_filename}，跳过下载，直接使用[/]")
+    else:
+        download_url = f"https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/{tar_filename}"
+        console.print(f"[cyan]下载 {download_url}...（视网络情况）[/]")
+        run(f"wget -O {tar_file} {download_url}")
+
     console.print("[cyan]解压 Flutter...[/]")
     run(f"tar xf {tar_file} -C {temp_dir}")
     run(f"mv {temp_dir}/flutter {flutter_copy_dest}")
-    tar_file.unlink(missing_ok=True)  # 清理 tar 包
+
+    # 清理 tar 包（可选：节省空间）
+    tar_file.unlink(missing_ok=True)
 
 else:  # git clone 方式
     pass  # 后面 Dockerfile 处理
