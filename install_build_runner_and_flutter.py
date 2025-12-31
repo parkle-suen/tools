@@ -91,7 +91,7 @@ else:  # 官方 tar.xz 下载
     version = version_input if version_input else version
     console.print(f"[green]将自动下载官方 tar.xz：Flutter {version} stable[/]")
 
-image_name = Prompt.ask("最终镜像名称", default=f"my-act-flutter:{channel}")
+image_name = Prompt.ask("最终镜像名称", default=f"my-act-flutter:{version}")
 
 console.print(f"\n[bold yellow]即将构建：{image_name}[/]")
 console.print(f"Flutter 来源：{source_choice}")
