@@ -50,11 +50,21 @@ console.print(Panel(
 ))
 
 # 1. 选择 Flutter 来源
-source_choice = Prompt.ask(
-    "选择 Flutter 来源",
-    choices=["本地目录", "远程 git clone", "官方 tar.xz 下载"],
-    default="官方 tar.xz 下载"
-)
+console.print("[bold cyan]请选择 Flutter 获取方式（输入数字）：[/]")
+console.print("1. 本地目录（已下载解压好的 Flutter SDK）")
+console.print("2. 远程 git clone（从 GitHub 下载）")
+console.print("3. 官方 tar.xz 下载（脚本自动下载稳定版包）")
+
+choice_num = Prompt.ask("输入 1/2/3", choices=["1", "2", "3"], default="3")
+
+if choice_num == "1":
+    source_choice = "本地目录"
+elif choice_num == "2":
+    source_choice = "远程 git clone"
+else:
+    source_choice = "官方 tar.xz 下载"
+
+console.print(f"[green]已选择：{source_choice}[/]")
 
 local_flutter_path = None
 channel = "stable"
