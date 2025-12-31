@@ -153,7 +153,7 @@ ENV FLUTTER_HOME=/opt/flutter
 ENV PATH="${{FLUTTER_HOME}}/bin:${{PATH}}"
 
 RUN flutter precache --universal --android --ios --web --linux && \\
-    flutter doctor --android-licenses --accept-all && \\
+    yes | flutter doctor --android-licenses && \\
     flutter create --platforms=android temp_app && \\
     cd temp_app && flutter pub get && flutter build apk --debug && rm -rf temp_app
 
