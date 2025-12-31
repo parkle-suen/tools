@@ -44,12 +44,11 @@ console.print(Panel(
     "1. 本地目录：已下载解压好的 Flutter 目录（最快）\n"
     "2. 远程 git clone：从 GitHub 下载（网络需稳定）\n"
     "3. 官方 tar.xz 下载：脚本自动下载稳定版包（推荐！避开 git 坑）\n\n"
-    "官方下载示例链接：https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.38.5-stable.tar.xz\n"
-    "脚本会自动检测临时目录下是否已有对应 tar.xz，存在则跳过下载",
+    "官方下载示例链接：https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.38.5-stable.tar.xz",
     title="获取方式说明", style="bold cyan"
 ))
 
-# 选择 Flutter 来源（数字选择）
+# 1. 选择 Flutter 来源（数字选择）
 console.print("[bold cyan]请选择 Flutter 获取方式（输入数字）：[/]")
 console.print("1. 本地目录（已下载解压好的 Flutter SDK）")
 console.print("2. 远程 git clone（从 GitHub 下载）")
@@ -104,9 +103,9 @@ elif source_choice == "官方 tar.xz 下载":
 if not Confirm.ask("确认开始构建？", default=True):
     sys.exit(0)
 
-# 临时构建目录（只在不存在时创建，不强制清空）
+# 临时构建目录（保留旧文件，检测重复下载）
 temp_dir = Path("/tmp/flutter_act_builder")
-temp_dir.mkdir(parents=True, exist_ok=True)  # 存在就保留
+temp_dir.mkdir(parents=True, exist_ok=True)
 dockerfile_path = temp_dir / "Dockerfile"
 
 flutter_copy_dest = temp_dir / "flutter"
@@ -129,7 +128,10 @@ elif source_choice == "官方 tar.xz 下载":
 
     console.print("[cyan]解压 Flutter...[/]")
     run(f"tar xf {tar_file} -C {temp_dir}")
-    run(f"mv {temp_dir}/flutter {flutter_copy_dest}")
+
+    # 重要修复：不 mv，直接用解压后的 flutter 目录
+    # flutter_copy_dest 就是 temp_dir/flutter，不需要移动
+    # 如果 flutter 已存在，跳过覆盖（但通常 tar xf 会覆盖）
 
     # 清理 tar 包（节省空间）
     tar_file.unlink(missing_ok=True)
@@ -137,7 +139,7 @@ elif source_choice == "官方 tar.xz 下载":
 else:  # git clone 方式
     pass  # 后面 Dockerfile 处理
 
-# 生成 Dockerfile（其余不变）
+# 生成 Dockerfile
 if source_choice in ["本地目录", "官方 tar.xz 下载"]:
     dockerfile_content = f"""FROM ghcr.io/catthehacker/ubuntu:act-latest
 
@@ -202,9 +204,8 @@ except subprocess.CalledProcessError as e:
     console.print(f"[bold red]构建失败：{e}[/]")
     sys.exit(1)
 
-# 清理（只删 dockerfile 和 flutter 临时目录，不删 tar.xz）
+# 清理
 dockerfile_path.unlink(missing_ok=True)
-run(f"rm -rf {temp_dir}/flutter")
 try:
     temp_dir.rmdir()
 except:
@@ -217,7 +218,6 @@ console.print(Panel(
     f"使用方式：在 Runner labels 中添加：\n"
     f"  flutter-stable:docker://{image_name}\n\n"
     f"Flutter 项目 workflow：runs-on: flutter-stable\n\n"
-    f"查看镜像：docker images | grep {image_name.split(':')[0]}\n"
-    f"临时文件已清理（tar.xz 保留在 {temp_dir} 以便下次复用）",
+    f"查看镜像：docker images | grep {image_name.split(':')[0]}",
     title="构建完成！", style="bold green"
 ))
