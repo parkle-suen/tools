@@ -42,6 +42,15 @@ def show_menu():
     """显示主菜单"""
     console.clear()
     console.rule("[bold magenta]🚀 Gitea Runner 一键注册工具（全标签版）[/]")
+    
+    # 添加红色大字警告
+    console.print(Panel.fit(
+        "[bold red]⚠️  重要警告：如果要彻底移除 Runner，请务必移除对应的持久卷！[/]\n\n"
+        "[yellow]删除容器命令：docker rm -f gitea-<runner-name>[/]\n"
+        "[yellow]删除卷命令：docker volume rm gitea-runner-data-<runner-name>[/]\n"
+        "[yellow]如果只删除容器不删除卷，下次创建同名 Runner 时会使用旧数据[/]",
+        title="重要提示", border_style="red"
+    ))
    
     console.print(Panel.fit(
         "[bold cyan]一个 Runner 将支持以下 6 种编译环境：[/]\n\n"
