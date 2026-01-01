@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Gitea Popular Runner 一键注册工具
-全标签版 - 一个 Runner 支持所有热门镜像（ubuntu-latest + java-8/11/17 + flutter-stable）
+全标签版 - 一个 Runner 支持所有热门镜像（ubuntu-latest + java-8/11/17/21 + flutter-stable）
 修复版：镜像拉取失败不中断注册
 """
 import os
@@ -49,6 +49,7 @@ def show_menu():
         "• [green]java-8[/]        - eclipse-temurin:8-jdk-jammy (预装纯净 JDK 8)\n"
         "• [green]java-11[/]       - eclipse-temurin:11-jdk-jammy (预装纯净 JDK 11)\n"
         "• [green]java-17[/]       - eclipse-temurin:17-jdk-jammy (预装纯净 JDK 17)\n"
+        "• [green]java-21[/]       - eclipse-temurin:21-jdk-jammy (预装纯净 JDK 21)\n"
         "• [green]flutter-stable[/] - ghcr.io/cirruslabs/flutter:stable (完整 Flutter + Android SDK)\n\n"
         "✅ [yellow]只需一个持久 Runner 容器[/]\n"
         "✅ [yellow]所有标签一次性注册，未使用标签无影响[/]\n"
@@ -146,6 +147,7 @@ def register_runner(gitea_info):
         "java-8:docker://eclipse-temurin:8-jdk-jammy,"
         "java-11:docker://eclipse-temurin:11-jdk-jammy,"
         "java-17:docker://eclipse-temurin:17-jdk-jammy,"
+        "java-21:docker://eclipse-temurin:21-jdk-jammy,"
         "flutter-stable:docker://ghcr.io/cirruslabs/flutter:stable"
     )
    
@@ -174,7 +176,7 @@ def register_runner(gitea_info):
         console.print("\n[bold cyan]📊 Runner 信息：[/]")
         console.print(f"容器名称：{container_name}")
         console.print(f"持久化卷：{volume_name}")
-        console.print("支持标签：ubuntu-latest, java-8, java-11, java-17, flutter-stable")
+        console.print("支持标签：ubuntu-latest, java-8, java-11, java-17, java-21 flutter-stable")
         console.print(f"Gitea URL：{gitea_info['url']}")
        
         return True, container_name
@@ -190,7 +192,7 @@ def show_usage_guide(container_name, failed_images):
    
     console.print(Panel.fit(
         f"[bold green]🎉 多标签 Runner 就绪！[/]\n\n"
-        f"支持标签：ubuntu-latest / java-8 / java-11 / java-17 / flutter-stable\n"
+        f"支持标签：ubuntu-latest / java-8 / java-11 / java-17 / java-21 / flutter-stable\n"
         f"📁 容器：{container_name}",
         title="注册完成", border_style="green"
     ))
