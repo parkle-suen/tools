@@ -89,9 +89,9 @@ def get_gitea_info():
     console.print("2. 点击 'Create new runner'")
     console.print("3. 复制生成的 Token\n")
    
-    token = Prompt.ask("粘贴 Registration Token")
+    token = Prompt.ask("粘贴 Registration Token",default="pT5W0RHmIuY63K8R5a3BfQ3KaMTN7TITz4DBECr8")
    
-    runner_name = Prompt.ask("Runner 名称", default="multi-runner")
+    runner_name = Prompt.ask("Runner 名称", default="my-runner")
    
     return {
         "url": gitea_url,
