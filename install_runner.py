@@ -3,7 +3,7 @@
 """
 Gitea Popular Runner 一键注册工具
 全标签版 - 一个 Runner 支持所有热门镜像（ubuntu-latest + java-8/11/17/21 + flutter-stable）
-修复版：镜像拉取失败不中断注册
+修复版：镜像拉取失败不中断注册 + 支持自定义 Runner 名称
 """
 import os
 import sys
@@ -44,7 +44,7 @@ def show_menu():
     console.rule("[bold magenta]🚀 Gitea Runner 一键注册工具（全标签版）[/]")
    
     console.print(Panel.fit(
-        "[bold cyan]一个 Runner 将支持以下 5 种编译环境：[/]\n\n"
+        "[bold cyan]一个 Runner 将支持以下 6 种编译环境：[/]\n\n"
         "• [green]ubuntu-latest[/] - catthehacker/ubuntu:act-latest (基础 Ubuntu 环境，兼容大多数 Actions)\n"
         "• [green]java-8[/]        - eclipse-temurin:8-jdk-jammy (预装纯净 JDK 8)\n"
         "• [green]java-11[/]       - eclipse-temurin:11-jdk-jammy (预装纯净 JDK 11)\n"
@@ -89,7 +89,7 @@ def get_gitea_info():
     console.print("2. 点击 'Create new runner'")
     console.print("3. 复制生成的 Token\n")
    
-    token = Prompt.ask("粘贴 Registration Token",default="pT5W0RHmIuY63K8R5a3BfQ3KaMTN7TITz4DBECr8")
+    token = Prompt.ask("粘贴 Registration Token", default="pT5W0RHmIuY63K8R5a3BfQ3KaMTN7TITz4DBECr8")
    
     runner_name = Prompt.ask("Runner 名称", default="my-runner")
    
@@ -128,8 +128,9 @@ def register_runner(gitea_info):
     console.print("\n" + "="*50)
     console.print("[bold yellow]📝 注册 Runner 到 Gitea[/]")
    
-    container_name = "gitea-multi-runner"
-    volume_name = "gitea-runner-data-multi"
+    runner_name = gitea_info['name']
+    container_name = f"gitea-{runner_name}"
+    volume_name = f"gitea-runner-data-{runner_name}"
    
     # 检查并清理同名容器
     result = run(f"docker ps -a --filter name=^{container_name}$ --format '{{{{.Names}}}}'", capture=True, check=False)
@@ -141,7 +142,7 @@ def register_runner(gitea_info):
             console.print("[yellow]跳过注册，使用现有容器[/]")
             return False, container_name
    
-    # 所有标签（可在此处增删）
+    # 所有标签
     labels = (
         "ubuntu-latest:docker://catthehacker/ubuntu:act-latest,"
         "java-8:docker://eclipse-temurin:8-jdk-jammy,"
@@ -176,17 +177,17 @@ def register_runner(gitea_info):
         console.print("\n[bold cyan]📊 Runner 信息：[/]")
         console.print(f"容器名称：{container_name}")
         console.print(f"持久化卷：{volume_name}")
-        console.print("支持标签：ubuntu-latest, java-8, java-11, java-17, java-21 flutter-stable")
+        console.print("支持标签：ubuntu-latest, java-8, java-11, java-17, java-21, flutter-stable")
         console.print(f"Gitea URL：{gitea_info['url']}")
        
-        return True, container_name
+        return True, container_name, volume_name
        
     except subprocess.CalledProcessError as e:
         console.print(f"[bold red]❌ Runner 注册失败！[/]")
         console.print(f"错误：{e.stderr[:500] if hasattr(e, 'stderr') and e.stderr else '未知错误'}")
-        return False, container_name
+        return False, container_name, volume_name
 
-def show_usage_guide(container_name, failed_images):
+def show_usage_guide(container_name, runner_name, failed_images):
     """显示使用指南"""
     console.print("\n" + "="*50)
    
@@ -250,6 +251,17 @@ jobs:
       - run: mvn clean package
       - run: java -jar target/*.jar --version[/]""")
    
+    console.print("\n[bold yellow]# Java 21 项目（JDK 21 已预装）[/]")
+    console.print("""name: Java 21 CI
+on: [push]
+jobs:
+  build:
+    runs-on: java-21
+    steps:
+      - uses: actions/checkout@v4
+      - run: mvn clean package
+      - run: java -version[/]""")
+   
     console.print("\n[bold yellow]# Flutter 项目[/]")
     console.print("""name: Flutter Build
 on: [push]
@@ -265,8 +277,8 @@ jobs:
     console.print(f"查看日志：docker logs -f {container_name}")
     console.print(f"重启：docker restart {container_name}")
     console.print(f"停止/删除：docker stop {container_name} && docker rm {container_name}")
-    console.print("删除卷：docker volume rm gitea-runner-data-multi")  # 直接硬编码，避免变量错误
-    console.print(f"查看 Runner：docker ps --filter name=gitea-multi-runner")
+    console.print(f"删除卷：docker volume rm gitea-runner-data-{runner_name}")
+    console.print(f"查看 Runner：docker ps --filter name=gitea-{runner_name}")
    
     console.print("\n[yellow]提示：若需调整标签，重新运行脚本或手动修改 GITEA_RUNNER_LABELS。[/]")
 
@@ -276,7 +288,7 @@ def main():
         check_root()
         show_menu()
        
-        if not Confirm.ask("\n确认注册所有标签的 Runner？（支持 5 种编译环境）", default=True):
+        if not Confirm.ask("\n确认注册所有标签的 Runner？（支持 6 种编译环境）", default=True):
             console.print("[yellow]已取消[/]")
             return
        
@@ -290,6 +302,7 @@ def main():
             "eclipse-temurin:8-jdk-jammy",
             "eclipse-temurin:11-jdk-jammy",
             "eclipse-temurin:17-jdk-jammy",
+            "eclipse-temurin:21-jdk-jammy",
             "ghcr.io/cirruslabs/flutter:stable"
         ]
        
@@ -298,13 +311,10 @@ def main():
             if not pull_image(img):
                 failed_images.append(img)
        
-        success, container_name = register_runner(gitea_info)
+        success, container_name, volume_name = register_runner(gitea_info)
        
         if success:
-            show_usage_guide(container_name, failed_images)
-        else:
-            console.print("[yellow]💡 可手动注册（若有失败镜像，请先手动拉取）：[/]")
-            # （手动命令保持不变，包含新 Flutter 镜像）
+            show_usage_guide(container_name, gitea_info['name'], failed_images)
        
         console.print("\n" + "="*50)
         console.print("[bold green]🎯 任务完成！[/]")
