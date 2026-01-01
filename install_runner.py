@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 Gitea Popular Runner 一键注册工具
-全标签版 - 一个 Runner 支持所有热门镜像（ubuntu-latest + java-8/11/17/21 + flutter-stable）
-修复版：镜像拉取失败不中断注册 + 支持自定义 Runner 名称
+全标签版 - 一个 Runner 支持所有热门镜像（ubuntu-latest + java-8/11/17/21 + flutter-custom）
+修复版：镜像拉取失败不中断注册 + 支持自定义 Runner 名称 + 可指定 Flutter 版本
 """
 import os
 import sys
@@ -50,7 +50,7 @@ def show_menu():
         "• [green]java-11[/]       - eclipse-temurin:11-jdk-jammy (预装纯净 JDK 11)\n"
         "• [green]java-17[/]       - eclipse-temurin:17-jdk-jammy (预装纯净 JDK 17)\n"
         "• [green]java-21[/]       - eclipse-temurin:21-jdk-jammy (预装纯净 JDK 21)\n"
-        "• [green]flutter-stable[/] - ghcr.io/cirruslabs/flutter:stable (完整 Flutter + Android SDK)\n\n"
+        "• [green]flutter (自定义)[/] - ghcr.io/cirruslabs/flutter:<版本> (完整 Flutter + Android SDK)\n\n"
         "✅ [yellow]只需一个持久 Runner 容器[/]\n"
         "✅ [yellow]所有标签一次性注册，未使用标签无影响[/]\n"
         "✅ [yellow]预拉取镜像失败不会中断注册（job 执行时自动拉取）[/]\n"
@@ -93,10 +93,16 @@ def get_gitea_info():
    
     runner_name = Prompt.ask("Runner 名称", default="my-runner")
    
+    console.print("\n[bold yellow]Flutter 版本配置：[/]")
+    console.print("[cyan]输入版本号（如 3.35.7），默认 3.35.7（稳定推荐）[/]")
+    console.print("[cyan]输入 'latest' 或 'stable' 使用最新 stable channel 版本[/]")
+    flutter_version = Prompt.ask("Flutter 版本", default="3.35.7").strip().lower()
+   
     return {
         "url": gitea_url,
         "token": token,
-        "name": runner_name
+        "name": runner_name,
+        "flutter_version": flutter_version
     }
 
 def pull_image(image_name):
@@ -142,6 +148,18 @@ def register_runner(gitea_info):
             console.print("[yellow]跳过注册，使用现有容器[/]")
             return False, container_name
    
+    # Flutter 镜像和标签处理
+    flutter_input = gitea_info['flutter_version']
+    if flutter_input in ['latest', 'stable']:
+        flutter_tag = "stable"
+        flutter_label = "flutter-stable"
+    else:
+        flutter_tag = flutter_input
+        flutter_label = f"flutter-{flutter_input}"
+   
+    flutter_image = f"ghcr.io/cirruslabs/flutter:{flutter_tag}"
+    flutter_label_entry = f"{flutter_label}:docker://{flutter_image}"
+   
     # 所有标签
     labels = (
         "ubuntu-latest:docker://catthehacker/ubuntu:act-latest,"
@@ -149,7 +167,7 @@ def register_runner(gitea_info):
         "java-11:docker://eclipse-temurin:11-jdk-jammy,"
         "java-17:docker://eclipse-temurin:17-jdk-jammy,"
         "java-21:docker://eclipse-temurin:21-jdk-jammy,"
-        "flutter-stable:docker://ghcr.io/cirruslabs/flutter:stable"
+        f"{flutter_label_entry}"
     )
    
     # 创建持久化卷
@@ -177,23 +195,23 @@ def register_runner(gitea_info):
         console.print("\n[bold cyan]📊 Runner 信息：[/]")
         console.print(f"容器名称：{container_name}")
         console.print(f"持久化卷：{volume_name}")
-        console.print("支持标签：ubuntu-latest, java-8, java-11, java-17, java-21, flutter-stable")
+        console.print(f"支持标签：ubuntu-latest, java-8, java-11, java-17, java-21, {flutter_label}")
         console.print(f"Gitea URL：{gitea_info['url']}")
        
-        return True, container_name, volume_name
+        return True, container_name, flutter_label, flutter_image
        
     except subprocess.CalledProcessError as e:
         console.print(f"[bold red]❌ Runner 注册失败！[/]")
         console.print(f"错误：{e.stderr[:500] if hasattr(e, 'stderr') and e.stderr else '未知错误'}")
-        return False, container_name, volume_name
+        return False, container_name, flutter_label, flutter_image
 
-def show_usage_guide(container_name, runner_name, failed_images):
+def show_usage_guide(container_name, runner_name, flutter_label, failed_images):
     """显示使用指南"""
     console.print("\n" + "="*50)
    
     console.print(Panel.fit(
         f"[bold green]🎉 多标签 Runner 就绪！[/]\n\n"
-        f"支持标签：ubuntu-latest / java-8 / java-11 / java-17 / java-21 / flutter-stable\n"
+        f"支持标签：ubuntu-latest / java-8 / java-11 / java-17 / java-21 / {flutter_label}\n"
         f"📁 容器：{container_name}",
         title="注册完成", border_style="green"
     ))
@@ -218,41 +236,9 @@ jobs:
       - uses: actions/checkout@v4
       - run: echo "运行在基础 Ubuntu 环境中"[/]""")
    
-    console.print("\n[bold yellow]# Java 8 项目（JDK 8 已预装）[/]")
-    console.print("""name: Java 8 CI
-on: [push]
-jobs:
-  build:
-    runs-on: java-8
-    steps:
-      - uses: actions/checkout@v4
-      - run: mvn clean package
-      - run: java -version[/]""")
-   
-    console.print("\n[bold yellow]# Java 11 项目（JDK 11 已预装）[/]")
-    console.print("""name: Java 11 CI
-on: [push]
-jobs:
-  build:
-    runs-on: java-11
-    steps:
-      - uses: actions/checkout@v4
-      - run: mvn clean package
-      - run: java -version[/]""")
-   
-    console.print("\n[bold yellow]# Java 17 项目（JDK 17 已预装）[/]")
-    console.print("""name: Java 17 CI
-on: [push]
-jobs:
-  build:
-    runs-on: java-17
-    steps:
-      - uses: actions/checkout@v4
-      - run: mvn clean package
-      - run: java -jar target/*.jar --version[/]""")
-   
-    console.print("\n[bold yellow]# Java 21 项目（JDK 21 已预装）[/]")
-    console.print("""name: Java 21 CI
+    console.print("\n[bold yellow]# Java 8/11/17/21 项目（对应 JDK 已预装）[/]")
+    console.print("""# 示例（替换为 java-8 / java-11 / java-17 / java-21）
+name: Java CI
 on: [push]
 jobs:
   build:
@@ -262,12 +248,12 @@ jobs:
       - run: mvn clean package
       - run: java -version[/]""")
    
-    console.print("\n[bold yellow]# Flutter 项目[/]")
-    console.print("""name: Flutter Build
+    console.print(f"\n[bold yellow]# Flutter 项目（使用 {flutter_label}）[/]")
+    console.print(f"""name: Flutter Build
 on: [push]
 jobs:
   build-android:
-    runs-on: flutter-stable
+    runs-on: {flutter_label}
     steps:
       - uses: actions/checkout@v4
       - run: flutter pub get
@@ -280,7 +266,7 @@ jobs:
     console.print(f"删除卷：docker volume rm gitea-runner-data-{runner_name}")
     console.print(f"查看 Runner：docker ps --filter name=gitea-{runner_name}")
    
-    console.print("\n[yellow]提示：若需调整标签，重新运行脚本或手动修改 GITEA_RUNNER_LABELS。[/]")
+    console.print("\n[yellow]提示：若需更改 Flutter 版本或其它标签，重新运行脚本即可。[/]")
 
 def main():
     """主函数"""
@@ -294,7 +280,18 @@ def main():
        
         gitea_info = get_gitea_info()
        
+        # Flutter 处理
+        flutter_input = gitea_info['flutter_version']
+        if flutter_input in ['latest', 'stable']:
+            flutter_tag = "stable"
+            flutter_label = "flutter-stable"
+        else:
+            flutter_tag = flutter_input
+            flutter_label = f"flutter-{flutter_input}"
+        flutter_image = f"ghcr.io/cirruslabs/flutter:{flutter_tag}"
+       
         console.print("\n" + "="*50)
+        console.print(f"[bold cyan]Flutter 配置：标签 {flutter_label}，镜像 {flutter_image}[/]")
         console.print("[bold cyan]开始尝试预拉取所有镜像（失败不影响注册）...[/]")
        
         images = [
@@ -303,7 +300,7 @@ def main():
             "eclipse-temurin:11-jdk-jammy",
             "eclipse-temurin:17-jdk-jammy",
             "eclipse-temurin:21-jdk-jammy",
-            "ghcr.io/cirruslabs/flutter:stable"
+            flutter_image
         ]
        
         failed_images = []
@@ -311,10 +308,10 @@ def main():
             if not pull_image(img):
                 failed_images.append(img)
        
-        success, container_name, volume_name = register_runner(gitea_info)
+        success, container_name, final_flutter_label, final_flutter_image = register_runner(gitea_info)
        
         if success:
-            show_usage_guide(container_name, gitea_info['name'], failed_images)
+            show_usage_guide(container_name, gitea_info['name'], final_flutter_label, failed_images)
        
         console.print("\n" + "="*50)
         console.print("[bold green]🎯 任务完成！[/]")
