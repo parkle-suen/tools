@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 诚通网盘 数据库 + Gitea 自动备份配置工具（加强版 - 支持7z加密 + Docker）
-修复版 v3.2 - 2025-12-30 支持 Docker 容器
+修复版 v3.3 - 2026-01-02 支持时区提醒、更健壮密码处理、rclone 配置检查
 """
 import os
 import subprocess
@@ -13,7 +13,7 @@ import sys
 import json
 from datetime import datetime
 
-SCRIPT_VERSION = "2025-12-30 v3.2"
+SCRIPT_VERSION = "2026-01-02 v3.3"
 BACKUP_SCRIPT_PATH = "/usr/local/bin/auto-backup-mysql-gitea.sh"
 CRON_PATH = "/etc/cron.d/auto-backup-mysql-gitea"
 RCLONE_REMOTE_NAME = "ctfile"
@@ -39,7 +39,6 @@ def is_root():
     return os.geteuid() == 0
 
 def check_required_commands():
-    # 只检查宿主机真正需要的命令（mysqldump 和 gitea 现在在容器内）
     required = ["7z", "jq"]
     missing = [cmd for cmd in required if not shutil.which(cmd)]
    
@@ -89,13 +88,19 @@ def install():
         print("\n安装 rclone...")
         run_cmd("curl https://rclone.org/install.sh | bash", shell=True)
 
-    print("\n正在创建/更新 rclone 配置...")
-    obscure_pass = run_cmd(["rclone", "obscure", ct_pass], capture_output=True).stdout.strip()
-    run_cmd([
-        "rclone", "config", "create", RCLONE_REMOTE_NAME, "webdav",
-        f"url={webdav_url}", "vendor=other",
-        f"user={ct_user}", f"pass={obscure_pass}"
-    ])
+    # 检查是否已存在同名 remote
+    list_result = run_cmd(["rclone", "listremotes"], capture_output=True, text=True)
+    existing_remotes = list_result.stdout.strip().splitlines()
+    if f"{RCLONE_REMOTE_NAME}:" in existing_remotes:
+        print(f"\n检测到 rclone 远程 '{RCLONE_REMOTE_NAME}' 已存在，将跳过创建（如需更新请手动执行 rclone config）")
+    else:
+        print("\n正在创建 rclone 配置...")
+        obscure_pass = run_cmd(["rclone", "obscure", ct_pass], capture_output=True).stdout.strip()
+        run_cmd([
+            "rclone", "config", "create", RCLONE_REMOTE_NAME, "webdav",
+            f"url={webdav_url}", "vendor=other",
+            f"user={ct_user}", f"pass={obscure_pass}"
+        ])
 
     # ── 第二步：选择备份内容 ──────────────────────────────────────────
     print("\n【2】 选择要自动备份的内容（可多选）")
@@ -120,23 +125,34 @@ def install():
         schedule = "03:00"
     hour, minute = map(int, schedule.split(':'))
 
+    # 时区重要提醒
+    print("\n【重要时区提醒】")
+    print("定时任务（crontab）使用服务器的系统时区执行。")
+    print("请确保服务器时区正确（例如 Asia/Shanghai），否则备份时间将与预期偏移！")
+    print("查看当前时区：timedatectl status")
+    print("设置时区示例：")
+    print("  sudo timedatectl set-timezone Asia/Shanghai")
+    print("  或 sudo dpkg-reconfigure tzdata\n")
+
     # ── 第四步：Docker MySQL 设置 ─────────────────────────────────────
     mysql_section = ""
     if backup_mysql:
-        print("\n【4】 Docker MySQL 备份设置")
+        print("【4】 Docker MySQL 备份设置")
         mysql_container = input(" MySQL 容器名: ").strip()
         db_user = input(" MySQL 用户名 [root]: ").strip() or "root"
         db_pass = getpass.getpass(" MySQL 密码: ")
+        # 转义双引号和反斜杠，确保 bash 中安全
+        db_pass_escaped = db_pass.replace('\\', '\\\\').replace('"', '\\"')
         mysql_section = f'''
 MYSQL_CONTAINER="{mysql_container}"
 MYSQL_USER="{db_user}"
-MYSQL_PASS='{db_pass}'
+MYSQL_PASS="{db_pass_escaped}"
 '''
 
     # ── 第五步：Docker Gitea 设置 ─────────────────────────────────────
     gitea_section = ""
     if backup_gitea:
-        print("\n【5】 Docker Gitea 备份设置")
+        print("【5】 Docker Gitea 备份设置")
         gitea_container = input(" Gitea 容器名: ").strip()
         gitea_user = input(" Gitea 容器内运行用户 [git]: ").strip() or "git"
         gitea_section = f'''
@@ -166,7 +182,7 @@ fail_notify() {{
     local msg="$2"
     curl -s -o /dev/null -H "Content-Type: application/json" \\
         -d '{{"topic":"'$NTFY_TOPIC'","title":"'$title'","message":"'$msg'","priority":4}}' \\
-        "$NTFY_URL"
+        "$NTFY_URL" || true
 }}
 log "=== 备份任务开始 ==="
 { mysql_section if backup_mysql else "" }
@@ -210,7 +226,7 @@ for file in "${{backup_files[@]}}"; do
         log "文件已丢失，跳过: $file"
         continue
     fi
-    LOCAL_SIZE=$(stat -c %s "$file" 2>/dev/null || stat -f %z "$file" 2>/dev/null || echo 0)
+    LOCAL_SIZE=$(wc -c < "$file")
     log "上传 $file (大小: $LOCAL_SIZE bytes)"
     
     if rclone copy "$file" "$RCLONE_REMOTE" --progress 2>>"$BACKUP_DIR/backup.log"
@@ -248,19 +264,25 @@ exit $has_error
         f.write(cron_content)
 
     print("\n" + "="*78)
-    print("Docker 版配置完成！（v3.2）")
+    print("Docker 版配置完成！（v3.3）")
     print(f"备份脚本： {BACKUP_SCRIPT_PATH}")
     print(f"定时任务： {CRON_PATH}")
     print(f"日志文件： {backup_dir}/backup.log")
     print("\n建议立即手动测试：")
     print(f" sudo {BACKUP_SCRIPT_PATH}")
+    print("\n【后期维护说明】")
+    print("・修改备份执行时间：")
+    print(f"   sudo nano {CRON_PATH}")
+    print("   编辑第二行的「分钟 小时」字段（例如改为 30 4 表示 04:30），保存后自动生效。")
+    print("・查看当前定时任务：cat {CRON_PATH}")
+    print("・重启 cron 服务（可选）：sudo systemctl restart cron")
     print("="*78)
 
 def uninstall():
     print("卸载指引：")
     print(f" sudo rm -f {BACKUP_SCRIPT_PATH}")
     print(f" sudo rm -f {CRON_PATH}")
-    print(f" rclone config delete {RCLONE_REMOTE_NAME} # 可选")
+    print(f" rclone config delete {RCLONE_REMOTE_NAME} # 可选，手动执行")
 
 def main():
     if len(sys.argv) > 1 and sys.argv[1].lower() in ("--uninstall", "-u", "uninstall"):

@@ -1,0 +1,92 @@
+# 完美且存粹yaml格式的CI/CD workflow,但不打算使用,只是留个备份,讨厌yaml中写脚本.转用python脚本
+# 支持小版本递增
+name: Build and Release APK
+
+on:
+  push:
+    branches: [ main ]  # 主分支推送触发
+  workflow_dispatch:  # 手动触发
+
+jobs:
+  build-and-release:
+    runs-on: flutter-stable  # 根据您的 Runner 标签调整
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 完整历史，用于 tag 查询
+
+      - name: Set up Flutter
+        run: flutter pub get
+
+      - name: Build APK
+        run: |
+          flutter build apk --release
+          mv build/app/outputs/flutter-apk/app-release.apk app-release.apk  # 统一文件名，便于上传
+
+      - name: Calculate Next Semantic Version
+        id: version
+        run: |
+          git fetch --tags
+          LATEST_TAG=$(git tag --sort=-version:refname | grep -E '^v?[0-9]+\.[0-9]+(\.[0-9]+)?$' | head -n1 || echo "")
+          
+          if [ -z "$LATEST_TAG" ]; then
+            NEXT_VERSION="0.1.0"  # 无 tag 时默认
+          else
+            # 去除 v 前缀
+            CLEAN_TAG=${LATEST_TAG#v}
+            
+            # 分割版本号
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$CLEAN_TAG"
+            
+            # 如果只有 major.minor，视为 patch=0
+            if [ -z "$PATCH" ]; then
+              PATCH=0
+              MINOR=${MINOR:-0}
+            fi
+            
+            # patch +1
+            PATCH=$((PATCH + 1))
+            
+            # 防止冲突：添加 build 号作为后缀（可选移除）
+            BUILD="${{ gitea.run_number }}"
+            NEXT_VERSION="${MAJOR}.${MINOR}.${PATCH}+build${BUILD}"
+          fi
+          
+          FULL_TAG="v${NEXT_VERSION}"
+          echo "next_tag=$FULL_TAG" >> $GITHUB_OUTPUT
+          echo "next_version=$NEXT_VERSION" >> $GITHUB_OUTPUT
+          echo "Calculated next version: $FULL_TAG"
+
+      - name: Create Release and Upload APK via Gitea API
+        env:
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+          GITEA_URL: http://192.168.0.169:3000
+          REPO_OWNER: ${{ gitea.repository_owner }}
+          REPO_NAME: ${{ gitea.repository }}
+        run: |
+          TAG="${{ steps.version.outputs.next_tag }}"
+          
+          # 步骤1：创建 Release 并获取 ID
+          RESPONSE=$(curl -s -X POST "$GITEA_URL/api/v1/repos/$REPO_OWNER/$REPO_NAME/releases" \
+            -H "Authorization: token $GITEA_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "tag_name": "'"$TAG"'",
+              "name": "'"$TAG"'",
+              "body": "Automatic release from Gitea Actions\nVersion: ${{ steps.version.outputs.next_version }}"
+            }')
+          
+          RELEASE_ID=$(echo "$RESPONSE" | grep -o '"id":[0-9]*' | cut -d: -f2)
+          
+          if [ -z "$RELEASE_ID" ]; then
+            echo "Release 创建失败：$RESPONSE"
+            exit 1
+          fi
+          
+          echo "Release 创建成功，ID: $RELEASE_ID"
+          
+          # 步骤2：使用 Release ID 上传统计
+          curl -X POST "$GITEA_URL/api/v1/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets" \
+            -H "Authorization: token $GITEA_TOKEN" \
+            -F "attachment=@app-release.apk;filename=app-release.apk"

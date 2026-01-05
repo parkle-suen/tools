@@ -1,0 +1,73 @@
+name: Execute Managed Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  execute-pipeline:
+    runs-on: [flutter-stable,java-8,java-11,java-17,java-21,ubuntu-latest]  # 匹配您的自建多标签 Runner
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 支持完整历史查询（如版本计算）
+
+      - name: Prepare & Execute Pipeline
+        env:
+          # 基础 Gitea 环境变量（脚本中可直接使用）
+          GITEA_TOKEN: ${{ gitea.token }}
+          GITEA_REPO: ${{ gitea.repository }}
+          GITEA_REPO_OWNER: ${{ gitea.repository_owner }}
+          GITEA_API_URL: ${{ gitea.api_url }}
+          GITEA_RUN_NUMBER: ${{ gitea.run_number }}
+          # 自定义扩展变量（示例，可自行添加）
+          NTFY_BASE_URL: "http://192.168.0.169:8125"
+          NTFY_TOPIC: "169"
+
+        run: |
+          echo "🐍 初始化 Python 环境与依赖..."
+
+          # --- 升级 pip（推荐） ---
+          python3 -m pip install --upgrade pip -q
+
+          # --- 步骤1：安装 .ci/requirements.txt（如果存在） ---
+          REQ_FILE=".ci/requirements.txt"
+          if [ -f "$REQ_FILE" ]; then
+            echo "📦 发现 requirements.txt，正在安装项目自定义依赖..."
+            python3 -m pip install -r "$REQ_FILE" -q --break-system-packages || true
+          else
+            echo "⚠️ 未找到 .ci/requirements.txt，跳过项目依赖安装"
+          fi
+
+          # --- 步骤2：安装额外固定依赖（始终执行） ---
+          EXTRA_PACKAGES="requests semver"  # 可在此直接添加/删除常用包
+          if [ -n "$EXTRA_PACKAGES" ]; then
+            echo "📦 安装额外固定依赖: $EXTRA_PACKAGES"
+            python3 -m pip install $EXTRA_PACKAGES -q --break-system-packages || true
+          fi
+
+          # --- 任务清单编排（顺序自由调整） ---
+          PIPELINE_STEPS=(
+            ".ci/check.py"         # 代码检查
+            ".ci/safe.py"          # 安全/漏洞扫描
+            ".ci/performance.py"   # 性能测试
+            ".ci/deploy.py"        # 部署
+          )
+
+          # --- 循环顺序执行 ---
+          echo "🚀 开始按序执行脚本清单..."
+          for script in "${PIPELINE_STEPS[@]}"; do
+            if [ -f "$script" ]; then
+              echo "------------------------------------------"
+              echo "▶️ 正在运行: $script"
+              python3 "$script" || { echo "❌ 失败: $script" ; exit 1; }
+            else
+              echo "------------------------------------------"
+              echo "⏭️ 跳过不存在的脚本: $script"
+            fi
+          done
+
+          echo "------------------------------------------"
+          echo "✨ 恭喜！所有流程已圆满完成。"
