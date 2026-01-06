@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Gitea Popular Runner 管理工具 - 优化增强版
-支持多版本批量下载和灵活配置
+支持多版本批量下载和灵活配置，包含 Amazon Corretto JDK
 """
 
 import os
@@ -35,7 +35,7 @@ except ImportError:
 console = Console()
 
 # ==================== 全局配置 ====================
-DEFAULT_JAVA_VERSIONS = ["8", "9", "11", "17", "21"]
+DEFAULT_JAVA_VERSIONS = ["8", "11", "17", "21", "25"]
 DEFAULT_FLUTTER_VERSIONS = ["3.35.7", "latest"]
 DEFAULT_UBUNTU_INSTALL = True
 
@@ -67,8 +67,8 @@ def parse_multi_version_input(input_str: str, default_versions: List[str]) -> Li
     # 分割版本
     versions = []
     for version in normalized.split(','):
-        version = version.strip()
-        if version:
+        version = version.strip().lower()
+        if version and version != 'skip':
             versions.append(version)
     
     return versions if versions else default_versions
@@ -160,19 +160,20 @@ def show_main_menu() -> int:
         "[bold cyan]📋 主要功能模块：[/]\n\n"
         "1. [green]重新完全安装注册 Runner[/] - 完整流程（包含下载和构建所有镜像）\n"
         "2. [green]仅下载多个 Flutter 版本镜像[/] - 拉取指定版本的 Flutter 镜像\n"
-        "3. [green]仅下载多个 JDK 版本镜像[/] - 拉取指定版本的 JDK 镜像\n"
-        "4. [green]仅下载 Ubuntu-Latest 工具镜像[/] - 拉取包含完整工具链的 Ubuntu 镜像\n"
-        "5. [green]仅注册 Runner（不下载镜像）[/] - 快速注册 Runner 容器\n"
-        "6. [green]管理现有 Runner[/] - 查看、重启、删除 Runner\n"
-        "7. [green]退出[/]\n\n"
+        "3. [green]仅下载多个 Temurin JDK 版本镜像[/] - 拉取指定版本的 Eclipse Temurin JDK 镜像\n"
+        "4. [green]仅下载多个 Amazon Corretto JDK 版本镜像[/] - 拉取指定版本的 AWS Amazon Corretto JDK 镜像\n"
+        "5. [green]仅下载 Ubuntu-Latest 工具镜像[/] - 拉取包含完整工具链的 Ubuntu 镜像\n"
+        "6. [green]仅注册 Runner（不下载镜像）[/] - 快速注册 Runner 容器\n"
+        "7. [green]管理现有 Runner[/] - 查看、重启、删除 Runner\n"
+        "8. [green]退出[/]\n\n"
         "[yellow]💡 提示：支持批量下载，输入多个版本时用空格、逗号或分号分隔[/]",
         title="功能菜单", border_style="cyan"
     ))
     
     while True:
         try:
-            choice = IntPrompt.ask("请选择功能编号", default=1, choices=["1", "2", "3", "4", "5", "6", "7"])
-            if 1 <= choice <= 7:
+            choice = IntPrompt.ask("请选择功能编号", default=1, choices=["1", "2", "3", "4", "5", "6", "7", "8"])
+            if 1 <= choice <= 8:
                 return choice
         except:
             pass
@@ -187,11 +188,30 @@ def module_complete_installation() -> bool:
     # 获取 Gitea 信息
     gitea_info = get_gitea_info()
     
-    console.print("\n[bold yellow]📦 配置要下载的 Java 版本[/]")
+    console.print("\n[bold yellow]📦 配置要下载的 Java 版本 (Eclipse Temurin)[/]")
     console.print("[cyan]请输入要下载的 Java 版本（多个版本用空格、逗号或分号分隔）[/]")
+    console.print("[cyan]输入 'skip' 跳过 Temurin JDK 安装[/]")
     console.print(f"[cyan]默认版本: {', '.join(DEFAULT_JAVA_VERSIONS)}[/]")
-    java_input = Prompt.ask("Java 版本", default=",".join(DEFAULT_JAVA_VERSIONS))
-    java_versions = parse_multi_version_input(java_input, DEFAULT_JAVA_VERSIONS)
+    java_input = Prompt.ask("Temurin JDK 版本", default=",".join(DEFAULT_JAVA_VERSIONS))
+    
+    if java_input.strip().lower() == 'skip':
+        temurin_versions = []
+        console.print("[yellow]已跳过 Temurin JDK 安装[/]")
+    else:
+        temurin_versions = parse_multi_version_input(java_input, DEFAULT_JAVA_VERSIONS)
+    
+    console.print("\n[bold yellow]📦 配置要下载的 Java 版本 (Amazon Corretto)[/]")
+    console.print("[cyan]请输入要下载的 AWS Amazon Corretto 版本（多个版本用空格、逗号或分号分隔）[/]")
+    console.print("[cyan]💡 Amazon Corretto 是 AWS 优化的 OpenJDK 发行版，在 AWS 环境性能更佳[/]")
+    console.print("[cyan]输入 'skip' 跳过 Amazon Corretto JDK 安装[/]")
+    console.print(f"[cyan]默认版本: {', '.join(DEFAULT_JAVA_VERSIONS)}[/]")
+    aws_java_input = Prompt.ask("Amazon Corretto JDK 版本", default=",".join(DEFAULT_JAVA_VERSIONS))
+    
+    if aws_java_input.strip().lower() == 'skip':
+        aws_java_versions = []
+        console.print("[yellow]已跳过 Amazon Corretto JDK 安装[/]")
+    else:
+        aws_java_versions = parse_multi_version_input(aws_java_input, DEFAULT_JAVA_VERSIONS)
     
     console.print("\n[bold yellow]📦 配置要下载的 Flutter 版本[/]")
     console.print("[cyan]请输入要下载的 Flutter 版本（多个版本用空格、逗号或分号分隔）[/]")
@@ -206,7 +226,16 @@ def module_complete_installation() -> bool:
     
     # 显示配置摘要
     console.print("\n[bold cyan]📋 配置摘要：[/]")
-    console.print(f"Java 版本: {', '.join(java_versions)}")
+    if temurin_versions:
+        console.print(f"Temurin JDK 版本: {', '.join(temurin_versions)}")
+    else:
+        console.print("Temurin JDK 版本: 跳过")
+    
+    if aws_java_versions:
+        console.print(f"Amazon Corretto JDK 版本: {', '.join(aws_java_versions)}")
+    else:
+        console.print("Amazon Corretto JDK 版本: 跳过")
+    
     console.print(f"Flutter 版本: {', '.join(flutter_versions)}")
     console.print(f"Ubuntu-Latest: {'是' if install_ubuntu else '否'}")
     console.print(f"Runner 名称: {gitea_info['name']}")
@@ -224,10 +253,15 @@ def module_complete_installation() -> bool:
     if install_ubuntu:
         all_images.append(("Ubuntu-Latest 工具镜像", "catthehacker/ubuntu:act-latest"))
     
-    # JDK 镜像
-    for version in java_versions:
+    # Temurin JDK 镜像
+    for version in temurin_versions:
         validated = validate_java_version(version)
-        all_images.append((f"JDK {version}", f"eclipse-temurin:{validated}-jdk-jammy"))
+        all_images.append((f"Temurin JDK {version}", f"eclipse-temurin:{validated}-jdk-jammy"))
+    
+    # Amazon Corretto JDK 镜像
+    for version in aws_java_versions:
+        validated = validate_java_version(version)
+        all_images.append((f"Amazon Corretto JDK {version}", f"public.ecr.aws/amazoncorretto/amazoncorretto:{validated}"))
     
     # Flutter 镜像
     for version in flutter_versions:
@@ -240,17 +274,18 @@ def module_complete_installation() -> bool:
             failed_images.append((name, image))
     
     # 注册 Runner
-    success = register_runner_with_versions(gitea_info, java_versions, flutter_versions, install_ubuntu)
+    success = register_runner_with_versions(gitea_info, temurin_versions, aws_java_versions, flutter_versions, install_ubuntu)
     
     if success:
-        show_runner_summary(gitea_info['name'], java_versions, flutter_versions, failed_images)
+        show_runner_summary(gitea_info['name'], temurin_versions, aws_java_versions, flutter_versions, failed_images)
     else:
         console.print("[bold red]❌ Runner 注册失败，请检查错误信息[/]")
     
     return success
 
-def register_runner_with_versions(gitea_info: Dict[str, Any], java_versions: List[str], 
-                                 flutter_versions: List[str], install_ubuntu: bool) -> bool:
+def register_runner_with_versions(gitea_info: Dict[str, Any], temurin_versions: List[str], 
+                                 aws_java_versions: List[str], flutter_versions: List[str], 
+                                 install_ubuntu: bool) -> bool:
     """注册 Runner 并支持多版本"""
     runner_name = gitea_info['name']
     container_name = f"gitea-{runner_name}"
@@ -273,10 +308,15 @@ def register_runner_with_versions(gitea_info: Dict[str, Any], java_versions: Lis
     if install_ubuntu:
         labels.append("ubuntu-latest:docker://catthehacker/ubuntu:act-latest")
     
-    # Java 标签
-    for version in java_versions:
+    # Temurin Java 标签
+    for version in temurin_versions:
         validated = validate_java_version(version)
         labels.append(f"java-{version}:docker://eclipse-temurin:{validated}-jdk-jammy")
+    
+    # Amazon Corretto Java 标签
+    for version in aws_java_versions:
+        validated = validate_java_version(version)
+        labels.append(f"java-aws-{version}:docker://public.ecr.aws/amazoncorretto/amazoncorretto:{validated}")
     
     # Flutter 标签
     for version in flutter_versions:
@@ -367,25 +407,25 @@ def module_download_flutter_only() -> None:
     else:
         console.print("[yellow]未找到 Flutter 镜像[/]")
 
-# ==================== 模块 3: 仅下载多个 JDK 版本镜像 ====================
-def module_download_jdk_only() -> None:
-    """模块3：仅下载多个JDK版本镜像"""
+# ==================== 模块 3: 仅下载多个 Temurin JDK 版本镜像 ====================
+def module_download_temurin_jdk_only() -> None:
+    """模块3：仅下载多个Eclipse Temurin JDK版本镜像"""
     console.print("\n" + "="*50)
-    console.print("[bold magenta]📥 模块3：仅下载多个 JDK 版本镜像[/]")
+    console.print("[bold magenta]📥 模块3：仅下载多个 Eclipse Temurin JDK 版本镜像[/]")
     
-    console.print("\n[bold yellow]📦 JDK 版本配置：[/]")
-    console.print("[cyan]请输入要下载的 JDK 版本（多个版本用空格、逗号或分号分隔）[/]")
-    console.print("[cyan]📝 支持格式示例: '8, 9, 11, 17, 21'[/]")
-    console.print("[cyan]💡 建议下载常用版本: 8, 11, 17, 21[/]")
+    console.print("\n[bold yellow]📦 Eclipse Temurin JDK 版本配置：[/]")
+    console.print("[cyan]请输入要下载的 Eclipse Temurin JDK 版本（多个版本用空格、逗号或分号分隔）[/]")
+    console.print("[cyan]📝 支持格式示例: '8, 11, 17, 21, 25'[/]")
+    console.print("[cyan]💡 建议下载常用版本: 8, 11, 17, 21, 25[/]")
     console.print(f"[cyan]🔧 默认版本: {', '.join(DEFAULT_JAVA_VERSIONS)}[/]")
     
-    jdk_input = Prompt.ask("JDK 版本", default=",".join(DEFAULT_JAVA_VERSIONS))
+    jdk_input = Prompt.ask("Eclipse Temurin JDK 版本", default=",".join(DEFAULT_JAVA_VERSIONS))
     jdk_versions = parse_multi_version_input(jdk_input, DEFAULT_JAVA_VERSIONS)
     
-    console.print(f"\n[bold cyan]📋 准备下载以下 JDK 版本：[/]")
+    console.print(f"\n[bold cyan]📋 准备下载以下 Eclipse Temurin JDK 版本：[/]")
     for i, version in enumerate(jdk_versions, 1):
         validated = validate_java_version(version)
-        console.print(f"{i}. JDK {version} → eclipse-temurin:{validated}-jdk-jammy")
+        console.print(f"{i}. Eclipse Temurin JDK {version} → eclipse-temurin:{validated}-jdk-jammy")
     
     if not Confirm.ask("\n确认下载以上镜像？", default=True):
         console.print("[yellow]取消下载[/]")
@@ -396,11 +436,11 @@ def module_download_jdk_only() -> None:
     for version in jdk_versions:
         validated = validate_java_version(version)
         image_name = f"eclipse-temurin:{validated}-jdk-jammy"
-        display_name = f"JDK {version} (eclipse-temurin:{validated}-jdk-jammy)"
+        display_name = f"Eclipse Temurin JDK {version} (eclipse-temurin:{validated}-jdk-jammy)"
         
         console.print(f"\n[yellow]正在下载: {display_name}[/]")
-        if not pull_single_image(image_name, f"JDK {version}"):
-            failed.append((f"JDK {version}", image_name))
+        if not pull_single_image(image_name, f"Eclipse Temurin JDK {version}"):
+            failed.append((f"Eclipse Temurin JDK {version}", image_name))
     
     # 显示结果
     console.print("\n" + "="*50)
@@ -411,19 +451,79 @@ def module_download_jdk_only() -> None:
     else:
         console.print("[bold green]✅ 所有选中镜像下载完成！[/]")
     
-    # 显示已下载的 JDK 镜像
-    console.print("\n[bold cyan]📋 已下载的 JDK 镜像：[/]")
+    # 显示已下载的 Eclipse Temurin JDK 镜像
+    console.print("\n[bold cyan]📋 已下载的 Eclipse Temurin JDK 镜像：[/]")
     result = run("docker images eclipse-temurin* --format 'table {{.Repository}}:{{.Tag}}\t{{.Size}}'", capture=True)
     if result.stdout:
         console.print(result.stdout)
     else:
         console.print("[yellow]未找到 eclipse-temurin 镜像[/]")
 
-# ==================== 模块 4: 仅下载 Ubuntu-Latest 工具镜像 ====================
-def module_download_ubuntu_only() -> None:
-    """模块4：仅下载Ubuntu-Latest工具镜像"""
+# ==================== 模块 4: 仅下载多个 Amazon Corretto JDK 版本镜像 ====================
+def module_download_aws_jdk_only() -> None:
+    """模块4：仅下载多个AWS Amazon Corretto JDK版本镜像"""
     console.print("\n" + "="*50)
-    console.print("[bold magenta]📥 模块4：仅下载 Ubuntu-Latest 工具镜像[/]")
+    console.print("[bold magenta]📥 模块4：仅下载多个 AWS Amazon Corretto JDK 版本镜像[/]")
+    
+    console.print("\n[bold yellow]📦 AWS Amazon Corretto JDK 版本配置：[/]")
+    console.print("[cyan]请输入要下载的 AWS Amazon Corretto JDK 版本（多个版本用空格、逗号或分号分隔）[/]")
+    console.print("[cyan]📝 支持格式示例: '8, 11, 17, 21, 25'[/]")
+    console.print("[cyan]💡 AWS Amazon Corretto 是 AWS 优化的 OpenJDK 发行版，在 AWS 环境性能更佳[/]")
+    console.print(f"[cyan]🔧 默认版本: {', '.join(DEFAULT_JAVA_VERSIONS)}[/]")
+    
+    aws_jdk_input = Prompt.ask("AWS Amazon Corretto JDK 版本", default=",".join(DEFAULT_JAVA_VERSIONS))
+    aws_jdk_versions = parse_multi_version_input(aws_jdk_input, DEFAULT_JAVA_VERSIONS)
+    
+    console.print(f"\n[bold cyan]📋 准备下载以下 AWS Amazon Corretto JDK 版本：[/]")
+    for i, version in enumerate(aws_jdk_versions, 1):
+        validated = validate_java_version(version)
+        console.print(f"{i}. AWS Amazon Corretto JDK {version} → public.ecr.aws/amazoncorretto/amazoncorretto:{validated}")
+    
+    if not Confirm.ask("\n确认下载以上镜像？", default=True):
+        console.print("[yellow]取消下载[/]")
+        return
+    
+    # 下载镜像
+    failed = []
+    for version in aws_jdk_versions:
+        validated = validate_java_version(version)
+        image_name = f"public.ecr.aws/amazoncorretto/amazoncorretto:{validated}"
+        display_name = f"AWS Amazon Corretto JDK {version} (public.ecr.aws/amazoncorretto/amazoncorretto:{validated})"
+        
+        console.print(f"\n[yellow]正在下载: {display_name}[/]")
+        if not pull_single_image(image_name, f"AWS Amazon Corretto JDK {version}"):
+            failed.append((f"AWS Amazon Corretto JDK {version}", image_name))
+    
+    # 显示结果
+    console.print("\n" + "="*50)
+    if failed:
+        console.print(f"[yellow]部分镜像下载失败 ({len(failed)}/{len(aws_jdk_versions)})[/]")
+        for name, image in failed:
+            console.print(f"[red]❌ {name}: {image}[/]")
+    else:
+        console.print("[bold green]✅ 所有选中镜像下载完成！[/]")
+    
+    # 显示已下载的 AWS Amazon Corretto JDK 镜像
+    console.print("\n[bold cyan]📋 已下载的 AWS Amazon Corretto JDK 镜像：[/]")
+    result = run("docker images public.ecr.aws/amazoncorretto/amazoncorretto* --format 'table {{.Repository}}:{{.Tag}}\t{{.Size}}'", capture=True)
+    if result.stdout:
+        console.print(result.stdout)
+    else:
+        console.print("[yellow]未找到 AWS Amazon Corretto JDK 镜像[/]")
+    
+    # 显示性能优势说明
+    console.print("\n[bold yellow]🚀 AWS Amazon Corretto JDK 优势：[/]")
+    console.print("• 专为 AWS 环境优化的 OpenJDK 发行版")
+    console.print("• 在 AWS EC2 实例上性能提升 10%-20%")
+    console.print("• 与 AWS 服务深度集成，兼容性更好")
+    console.print("• 提供长期支持 (LTS) 版本")
+    console.print("• 适用于部署在 AWS 环境的 Java 应用程序")
+
+# ==================== 模块 5: 仅下载 Ubuntu-Latest 工具镜像 ====================
+def module_download_ubuntu_only() -> None:
+    """模块5：仅下载Ubuntu-Latest工具镜像"""
+    console.print("\n" + "="*50)
+    console.print("[bold magenta]📥 模块5：仅下载 Ubuntu-Latest 工具镜像[/]")
     
     ubuntu_image = "catthehacker/ubuntu:act-latest"
     
@@ -457,11 +557,11 @@ def module_download_ubuntu_only() -> None:
         console.print("在 workflow 中配置: [green]runs-on: ubuntu-latest[/]")
         console.print("Runner 会自动使用此镜像执行任务")
 
-# ==================== 模块 5: 仅注册 Runner ====================
+# ==================== 模块 6: 仅注册 Runner ====================
 def module_register_runner_only() -> None:
-    """模块5：仅注册Runner（不下载镜像）"""
+    """模块6：仅注册Runner（不下载镜像）"""
     console.print("\n" + "="*50)
-    console.print("[bold magenta]🚀 模块5：仅注册 Runner（快速模式）[/]")
+    console.print("[bold magenta]🚀 模块6：仅注册 Runner（快速模式）[/]")
     
     console.print("[yellow]⚠️  注意：此模式假设所需镜像已存在本地[/]")
     console.print("[yellow]如果镜像不存在，job 执行时会自动拉取，但首次运行会较慢[/]")
@@ -470,9 +570,25 @@ def module_register_runner_only() -> None:
     gitea_info = get_gitea_info()
     
     console.print("\n[bold yellow]📦 配置 Runner 支持的标签[/]")
-    console.print("[cyan]请输入支持的 Java 版本（多个版本用空格、逗号或分号分隔）[/]")
-    java_input = Prompt.ask("Java 版本", default=",".join(DEFAULT_JAVA_VERSIONS))
-    java_versions = parse_multi_version_input(java_input, DEFAULT_JAVA_VERSIONS)
+    console.print("[cyan]请输入支持的 Eclipse Temurin Java 版本（多个版本用空格、逗号或分号分隔）[/]")
+    console.print("[cyan]输入 'skip' 跳过 Temurin JDK[/]")
+    temurin_input = Prompt.ask("Eclipse Temurin JDK 版本", default=",".join(DEFAULT_JAVA_VERSIONS))
+    
+    if temurin_input.strip().lower() == 'skip':
+        temurin_versions = []
+        console.print("[yellow]已跳过 Eclipse Temurin JDK[/]")
+    else:
+        temurin_versions = parse_multi_version_input(temurin_input, DEFAULT_JAVA_VERSIONS)
+    
+    console.print("\n[cyan]请输入支持的 AWS Amazon Corretto Java 版本（多个版本用空格、逗号或分号分隔）[/]")
+    console.print("[cyan]输入 'skip' 跳过 Amazon Corretto JDK[/]")
+    aws_java_input = Prompt.ask("AWS Amazon Corretto JDK 版本", default=",".join(DEFAULT_JAVA_VERSIONS))
+    
+    if aws_java_input.strip().lower() == 'skip':
+        aws_java_versions = []
+        console.print("[yellow]已跳过 AWS Amazon Corretto JDK[/]")
+    else:
+        aws_java_versions = parse_multi_version_input(aws_java_input, DEFAULT_JAVA_VERSIONS)
     
     console.print("\n[cyan]请输入支持的 Flutter 版本（多个版本用空格、逗号或分号分隔）[/]")
     flutter_input = Prompt.ask("Flutter 版本", default=",".join(DEFAULT_FLUTTER_VERSIONS))
@@ -482,7 +598,7 @@ def module_register_runner_only() -> None:
     support_ubuntu = Confirm.ask("支持 Ubuntu-Latest", default=True)
     
     # 直接注册 Runner
-    success = register_runner_with_versions(gitea_info, java_versions, flutter_versions, support_ubuntu)
+    success = register_runner_with_versions(gitea_info, temurin_versions, aws_java_versions, flutter_versions, support_ubuntu)
     
     if success:
         console.print("\n[bold green]✅ Runner 注册成功！[/]")
@@ -491,8 +607,10 @@ def module_register_runner_only() -> None:
         tags = []
         if support_ubuntu:
             tags.append("ubuntu-latest")
-        for version in java_versions:
+        for version in temurin_versions:
             tags.append(f"java-{version}")
+        for version in aws_java_versions:
+            tags.append(f"java-aws-{version}")
         for version in flutter_versions:
             validated = validate_flutter_version(version)
             tags.append(f"flutter-{validated}" if validated != 'stable' else "flutter-stable")
@@ -504,11 +622,11 @@ def module_register_runner_only() -> None:
     else:
         console.print("[bold red]❌ Runner 注册失败[/]")
 
-# ==================== 模块 6: 管理现有 Runner ====================
+# ==================== 模块 7: 管理现有 Runner ====================
 def module_manage_runners() -> None:
-    """模块6：管理现有Runner"""
+    """模块7：管理现有Runner"""
     console.print("\n" + "="*50)
-    console.print("[bold magenta]🔧 模块6：管理现有 Runner[/]")
+    console.print("[bold magenta]🔧 模块7：管理现有 Runner[/]")
     
     # 获取所有 Gitea Runner 容器
     result = run("docker ps -a --filter name=gitea- --format '{{.Names}}'", capture=True, check=False)
@@ -619,8 +737,9 @@ def module_manage_runners() -> None:
         run(f"docker inspect {selected_container} --format '{{{{range .Config.Env}}}}{{{{.}}}}\n{{{{end}}}}'", check=False)
 
 # ==================== 辅助函数 ====================
-def show_runner_summary(runner_name: str, java_versions: List[str], 
-                       flutter_versions: List[str], failed_images: List[Tuple[str, str]]) -> None:
+def show_runner_summary(runner_name: str, temurin_versions: List[str], 
+                       aws_java_versions: List[str], flutter_versions: List[str], 
+                       failed_images: List[Tuple[str, str]]) -> None:
     """显示 Runner 安装摘要"""
     container_name = f"gitea-{runner_name}"
     
@@ -628,8 +747,10 @@ def show_runner_summary(runner_name: str, java_versions: List[str],
     
     # 构建支持的标签列表
     tags = ["ubuntu-latest"]
-    for version in java_versions:
+    for version in temurin_versions:
         tags.append(f"java-{version}")
+    for version in aws_java_versions:
+        tags.append(f"java-aws-{version}")
     for version in flutter_versions:
         validated = validate_flutter_version(version)
         tags.append(f"flutter-{validated}" if validated != 'stable' else "flutter-stable")
@@ -681,28 +802,32 @@ def main() -> None:
                 module_download_flutter_only()
                 
             elif choice == 3:
-                # 模块3: 仅下载多个JDK版本镜像
-                module_download_jdk_only()
+                # 模块3: 仅下载多个Temurin JDK版本镜像
+                module_download_temurin_jdk_only()
                 
             elif choice == 4:
-                # 模块4: 仅下载Ubuntu-Latest工具镜像
-                module_download_ubuntu_only()
+                # 模块4: 仅下载多个Amazon Corretto JDK版本镜像
+                module_download_aws_jdk_only()
                 
             elif choice == 5:
-                # 模块5: 仅注册Runner（不下载镜像）
-                module_register_runner_only()
+                # 模块5: 仅下载Ubuntu-Latest工具镜像
+                module_download_ubuntu_only()
                 
             elif choice == 6:
-                # 模块6: 管理现有Runner
-                module_manage_runners()
+                # 模块6: 仅注册Runner（不下载镜像）
+                module_register_runner_only()
                 
             elif choice == 7:
+                # 模块7: 管理现有Runner
+                module_manage_runners()
+                
+            elif choice == 8:
                 # 退出
                 console.print("\n[bold green]👋 感谢使用，再见！[/]")
                 break
             
             # 询问是否继续
-            if choice != 7:
+            if choice != 8:
                 console.print("\n" + "="*50)
                 if not Confirm.ask("是否返回主菜单？", default=True):
                     console.print("\n[bold green]👋 感谢使用，再见！[/]")
