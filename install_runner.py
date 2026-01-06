@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gitea Popular Runner 管理工具 - 模块化增强版
-支持独立执行各个功能模块
+Gitea Popular Runner 管理工具 - 优化增强版
+支持多版本批量下载和灵活配置
 """
+
 import os
 import sys
 import subprocess
 import tempfile
+import re
+from typing import List, Dict, Any, Tuple
+
+# 尝试导入 rich 库，如果不存在则自动安装
 try:
     from rich import print
     from rich.panel import Panel
@@ -15,6 +20,7 @@ try:
     from rich.console import Console
     from rich.progress import Progress, SpinnerColumn, TextColumn
     from rich.table import Table
+    from rich.markdown import Markdown
 except ImportError:
     print("\033[93m正在安装 rich...\033[0m")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "rich"])
@@ -24,48 +30,156 @@ except ImportError:
     from rich.console import Console
     from rich.progress import Progress, SpinnerColumn, TextColumn
     from rich.table import Table
+    from rich.markdown import Markdown
 
 console = Console()
 
-def run(cmd: str, capture=False, check=True):
+# ==================== 全局配置 ====================
+DEFAULT_JAVA_VERSIONS = ["8", "9", "11", "17", "21"]
+DEFAULT_FLUTTER_VERSIONS = ["3.35.7", "latest"]
+DEFAULT_UBUNTU_INSTALL = True
+
+# ==================== 工具函数 ====================
+def run(cmd: str, capture: bool = False, check: bool = True) -> subprocess.CompletedProcess:
     """运行命令"""
     kwargs = {"shell": True, "check": check, "text": True}
     if capture:
         kwargs["capture_output"] = True
     return subprocess.run(cmd, **kwargs)
 
-def check_root():
+def check_root() -> None:
     """检查是否为 root 权限"""
     if os.geteuid() != 0:
         console.print("[bold red]请使用 sudo 运行此脚本[/]")
         sys.exit(1)
 
-def show_main_menu():
+def parse_multi_version_input(input_str: str, default_versions: List[str]) -> List[str]:
+    """
+    解析多版本输入字符串
+    支持空格、逗号、分号分隔
+    """
+    if not input_str.strip():
+        return default_versions
+    
+    # 替换所有分隔符为逗号
+    normalized = re.sub(r'[ ,;]+', ',', input_str.strip())
+    
+    # 分割版本
+    versions = []
+    for version in normalized.split(','):
+        version = version.strip()
+        if version:
+            versions.append(version)
+    
+    return versions if versions else default_versions
+
+def validate_flutter_version(version: str) -> str:
+    """验证并标准化 Flutter 版本"""
+    if version.lower() in ['latest', 'stable']:
+        return 'stable'
+    # 简单验证版本格式
+    if re.match(r'^\d+(\.\d+)*$', version):
+        return version
+    return version  # 如果不是标准格式，也允许尝试
+
+def validate_java_version(version: str) -> str:
+    """验证 Java 版本"""
+    try:
+        v = int(version)
+        if v >= 8 and v <= 25:  # 合理的 Java 版本范围
+            return str(v)
+    except ValueError:
+        pass
+    return version  # 如果不是数字，允许用户尝试
+
+def pull_single_image(image_name: str, display_name: str = None) -> bool:
+    """拉取单个镜像"""
+    name = display_name or image_name
+    console.print(f"[yellow]拉取: {name} ({image_name})[/]")
+    
+    try:
+        with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}")) as progress:
+            task = progress.add_task("拉取中...", total=None)
+            run(f"docker pull {image_name}", capture=True)
+            progress.update(task, completed=True)
+        
+        console.print(f"[green]✅ {name} 拉取成功[/]")
+        return True
+        
+    except subprocess.CalledProcessError as e:
+        console.print(f"[red]❌ {name} 拉取失败[/]")
+        console.print(f"[yellow]错误: {e.stderr[:200] if hasattr(e, 'stderr') and e.stderr else '未知错误'}[/]")
+        return False
+
+def get_gitea_info() -> Dict[str, Any]:
+    """获取 Gitea 基本信息"""
+    console.print("\n[bold yellow]📋 Gitea 配置信息[/]")
+    
+    try:
+        result = run("hostname -I", capture=True, check=False)
+        if result.stdout:
+            ips = [ip.strip() for ip in result.stdout.split() if ip.strip()]
+            default_url = f"http://{ips[0]}:3000/"
+        else:
+            default_url = "http://localhost:3000/"
+    except:
+        default_url = "http://localhost:3000/"
+    
+    console.print(f"[cyan]自动检测到本地 IP，默认 URL: {default_url}[/]")
+    
+    gitea_url = Prompt.ask(
+        "Gitea 实例 URL (以 / 结尾)",
+        default=default_url
+    )
+    
+    if not gitea_url.endswith('/'):
+        gitea_url += '/'
+    
+    console.print("\n[bold yellow]🔑 获取 Registration Token：[/]")
+    console.print("1. 访问 Gitea 管理页面：")
+    console.print(f"   [blue]{gitea_url}admin/actions/runners[/]")
+    console.print("2. 点击 'Create new runner'")
+    console.print("3. 复制生成的 Token\n")
+    
+    token = Prompt.ask("粘贴 Registration Token", default="oRyijO9he0A7cNWU6YT4YiDGemOljPn64ynMkMTq")
+    
+    runner_name = Prompt.ask("Runner 名称", default="my-runner")
+    
+    return {
+        "url": gitea_url,
+        "token": token,
+        "name": runner_name
+    }
+
+def show_main_menu() -> int:
     """显示主菜单"""
     console.clear()
-    console.rule("[bold magenta]🚀 Gitea Runner 管理工具 - 模块化增强版[/]")
+    console.rule("[bold magenta]🚀 Gitea Runner 管理工具 - 优化增强版[/]")
     
     console.print(Panel.fit(
         "[bold cyan]📋 主要功能模块：[/]\n\n"
         "1. [green]重新完全安装注册 Runner[/] - 完整流程（包含下载和构建所有镜像）\n"
-        "2. [green]仅编译安装 Flutter 增强版镜像[/] - 构建包含完整工具链的 Flutter 镜像\n"
-        "3. [green]仅下载 JDK 多个版本镜像[/] - 拉取 JDK 8/11/17/21 镜像\n"
-        "4. [green]仅下载 Ubuntu-Latest 镜像[/] - 拉取基础 Ubuntu 环境镜像\n"
+        "2. [green]仅下载多个 Flutter 版本镜像[/] - 拉取指定版本的 Flutter 镜像\n"
+        "3. [green]仅下载多个 JDK 版本镜像[/] - 拉取指定版本的 JDK 镜像\n"
+        "4. [green]仅下载 Ubuntu-Latest 工具镜像[/] - 拉取包含完整工具链的 Ubuntu 镜像\n"
         "5. [green]仅注册 Runner（不下载镜像）[/] - 快速注册 Runner 容器\n"
         "6. [green]管理现有 Runner[/] - 查看、重启、删除 Runner\n"
         "7. [green]退出[/]\n\n"
-        "[yellow]💡 提示：您可以选择单独执行某个模块，避免重复操作[/]",
+        "[yellow]💡 提示：支持批量下载，输入多个版本时用空格、逗号或分号分隔[/]",
         title="功能菜单", border_style="cyan"
     ))
     
     while True:
-        choice = IntPrompt.ask("请选择功能编号", default=1, choices=["1", "2", "3", "4", "5", "6", "7"])
-        if 1 <= choice <= 7:
-            return choice
+        try:
+            choice = IntPrompt.ask("请选择功能编号", default=1, choices=["1", "2", "3", "4", "5", "6", "7"])
+            if 1 <= choice <= 7:
+                return choice
+        except:
+            pass
         console.print("[red]无效的选择，请重新输入[/]")
 
 # ==================== 模块 1: 完整安装注册 ====================
-def module_complete_installation():
+def module_complete_installation() -> bool:
     """模块1：重新完全安装注册Runner（包含下载镜像）"""
     console.print("\n" + "="*50)
     console.print("[bold magenta]🔧 模块1：重新完全安装注册 Runner[/]")
@@ -73,178 +187,231 @@ def module_complete_installation():
     # 获取 Gitea 信息
     gitea_info = get_gitea_info()
     
+    console.print("\n[bold yellow]📦 配置要下载的 Java 版本[/]")
+    console.print("[cyan]请输入要下载的 Java 版本（多个版本用空格、逗号或分号分隔）[/]")
+    console.print(f"[cyan]默认版本: {', '.join(DEFAULT_JAVA_VERSIONS)}[/]")
+    java_input = Prompt.ask("Java 版本", default=",".join(DEFAULT_JAVA_VERSIONS))
+    java_versions = parse_multi_version_input(java_input, DEFAULT_JAVA_VERSIONS)
+    
+    console.print("\n[bold yellow]📦 配置要下载的 Flutter 版本[/]")
+    console.print("[cyan]请输入要下载的 Flutter 版本（多个版本用空格、逗号或分号分隔）[/]")
+    console.print("[cyan]可以输入具体的版本号如 3.35.7，或使用 'latest' 表示最新稳定版[/]")
+    console.print(f"[cyan]默认版本: {', '.join(DEFAULT_FLUTTER_VERSIONS)}[/]")
+    flutter_input = Prompt.ask("Flutter 版本", default=",".join(DEFAULT_FLUTTER_VERSIONS))
+    flutter_versions = parse_multi_version_input(flutter_input, DEFAULT_FLUTTER_VERSIONS)
+    
+    console.print("\n[bold yellow]📦 配置 Ubuntu-Latest 工具镜像[/]")
+    console.print("[cyan]这个镜像包含完整的 Ubuntu 基础环境和常用开发工具，兼容大多数 GitHub Actions[/]")
+    install_ubuntu = Confirm.ask("是否下载 Ubuntu-Latest 工具镜像？", default=DEFAULT_UBUNTU_INSTALL)
+    
+    # 显示配置摘要
+    console.print("\n[bold cyan]📋 配置摘要：[/]")
+    console.print(f"Java 版本: {', '.join(java_versions)}")
+    console.print(f"Flutter 版本: {', '.join(flutter_versions)}")
+    console.print(f"Ubuntu-Latest: {'是' if install_ubuntu else '否'}")
+    console.print(f"Runner 名称: {gitea_info['name']}")
+    
+    if not Confirm.ask("\n确认以上配置并开始安装？", default=True):
+        console.print("[yellow]取消安装[/]")
+        return False
+    
     # 预拉取所有基础镜像
     console.print("\n[bold cyan]📥 开始预拉取所有基础镜像...[/]")
     
-    all_images = [
-        ("基础 Ubuntu 环境", "catthehacker/ubuntu:act-latest"),
-        ("JDK 8", "eclipse-temurin:8-jdk-jammy"),
-        ("JDK 11", "eclipse-temurin:11-jdk-jammy"),
-        ("JDK 17", "eclipse-temurin:17-jdk-jammy"),
-        ("JDK 21", "eclipse-temurin:21-jdk-jammy"),
-    ]
+    all_images = []
     
-    # 如果用户选择构建增强版 Flutter 镜像，则不预拉取原始镜像
-    flutter_config = gitea_info.get('enhanced_config', {})
-    if not flutter_config.get('enabled', False):
-        flutter_tag = "stable" if gitea_info['flutter_version'] in ['latest', 'stable'] else gitea_info['flutter_version']
-        all_images.append(("Flutter 基础镜像", f"ghcr.io/cirruslabs/flutter:{flutter_tag}"))
+    # Ubuntu 镜像
+    if install_ubuntu:
+        all_images.append(("Ubuntu-Latest 工具镜像", "catthehacker/ubuntu:act-latest"))
+    
+    # JDK 镜像
+    for version in java_versions:
+        validated = validate_java_version(version)
+        all_images.append((f"JDK {version}", f"eclipse-temurin:{validated}-jdk-jammy"))
+    
+    # Flutter 镜像
+    for version in flutter_versions:
+        validated = validate_flutter_version(version)
+        all_images.append((f"Flutter {version}", f"ghcr.io/cirruslabs/flutter:{validated}"))
     
     failed_images = []
     for name, image in all_images:
-        console.print(f"\n[yellow]正在拉取: {name}[/]")
         if not pull_single_image(image, name):
             failed_images.append((name, image))
     
-    # 构建或处理 Flutter 镜像
-    flutter_image = handle_flutter_image(gitea_info)
-    
     # 注册 Runner
-    success, container_name, flutter_label, _ = register_runner(gitea_info, flutter_image)
+    success = register_runner_with_versions(gitea_info, java_versions, flutter_versions, install_ubuntu)
     
     if success:
-        show_runner_summary(container_name, gitea_info['name'], flutter_label, failed_images)
+        show_runner_summary(gitea_info['name'], java_versions, flutter_versions, failed_images)
     else:
         console.print("[bold red]❌ Runner 注册失败，请检查错误信息[/]")
     
     return success
 
-# ==================== 模块 2: 仅编译 Flutter 镜像 ====================
-def module_build_flutter_only():
-    """模块2：仅编译安装Flutter增强版镜像"""
-    console.print("\n" + "="*50)
-    console.print("[bold magenta]🔨 模块2：仅编译安装 Flutter 增强版镜像[/]")
+def register_runner_with_versions(gitea_info: Dict[str, Any], java_versions: List[str], 
+                                 flutter_versions: List[str], install_ubuntu: bool) -> bool:
+    """注册 Runner 并支持多版本"""
+    runner_name = gitea_info['name']
+    container_name = f"gitea-{runner_name}"
+    volume_name = f"gitea-runner-data-{runner_name}"
     
-    # 获取 Flutter 版本
-    console.print("\n[bold yellow]Flutter 版本配置：[/]")
-    flutter_version = Prompt.ask(
-        "输入 Flutter 版本（如 3.35.7，或输入 stable/latest）",
-        default="stable"
-    ).strip().lower()
+    # 检查并清理同名容器
+    result = run(f"docker ps -a --filter name=^{container_name}$ --format '{{{{.Names}}}}'", capture=True, check=False)
+    if result.stdout.strip() == container_name:
+        if Confirm.ask(f"已存在容器 '{container_name}'，是否删除并重新创建？", default=True):
+            run(f"docker stop {container_name}", check=False)
+            run(f"docker rm {container_name}", check=False)
+        else:
+            console.print("[yellow]跳过注册，使用现有容器[/]")
+            return False
     
-    if flutter_version in ['latest', 'stable']:
-        flutter_tag = "stable"
-    else:
-        flutter_tag = flutter_version
+    # 构建标签列表
+    labels = []
     
-    base_image = f"ghcr.io/cirruslabs/flutter:{flutter_tag}"
+    # Ubuntu 标签
+    if install_ubuntu:
+        labels.append("ubuntu-latest:docker://catthehacker/ubuntu:act-latest")
     
-    # 配置增强版选项
-    console.print("\n[bold yellow]🛠️ 增强版镜像配置：[/]")
-    console.print("[cyan]原始 ghcr.io/cirruslabs/flutter 镜像缺少 Python 和 Node.js 工具[/]")
-    build_enhanced = Confirm.ask("是否构建增强版 Flutter 镜像？", default=True)
+    # Java 标签
+    for version in java_versions:
+        validated = validate_java_version(version)
+        labels.append(f"java-{version}:docker://eclipse-temurin:{validated}-jdk-jammy")
     
-    if not build_enhanced:
-        console.print("[yellow]取消构建，返回主菜单[/]")
-        return
+    # Flutter 标签
+    for version in flutter_versions:
+        validated = validate_flutter_version(version)
+        if validated == 'stable':
+            labels.append("flutter-stable:docker://ghcr.io/cirruslabs/flutter:stable")
+        else:
+            labels.append(f"flutter-{validated}:docker://ghcr.io/cirruslabs/flutter:{validated}")
     
-    # 配置包选项
-    console.print("\n[bold yellow]📦 增强版镜像配置：[/]")
-    include_all = Confirm.ask("安装所有推荐的 Python 包和工具？", default=True)
+    labels_str = ','.join(labels)
     
-    if not include_all:
-        console.print("[cyan]选择 Python 包：[/]")
-        include_requests = Confirm.ask("安装 requests 包？", default=True)
-        include_semver = Confirm.ask("安装 semver 包？", default=True)
-        include_yaml = Confirm.ask("安装 PyYAML 包？", default=True)
-        include_jsonschema = Confirm.ask("安装 jsonschema 包？", default=True)
-        include_docker = Confirm.ask("安装 Docker Python SDK？", default=True)
-    else:
-        include_requests = include_semver = include_yaml = include_jsonschema = include_docker = True
+    # 创建持久化卷
+    run(f"docker volume create {volume_name}", check=False)
     
-    # 构建配置
-    extra_packages = []
-    if include_requests: extra_packages.append("requests")
-    if include_semver: extra_packages.append("semver")
-    if include_yaml: extra_packages.append("pyyaml")
-    if include_jsonschema: extra_packages.append("jsonschema")
-    if include_docker: extra_packages.append("docker")
+    # 启动容器
+    console.print(f"[cyan]启动 Runner 容器：{container_name}[/]")
     
-    enhanced_config = {
-        "enabled": True,
-        "extra_packages": extra_packages,
-        "install_all": include_all
-    }
+    docker_cmd = f"""docker run -d \
+  --name {container_name} \
+  --restart unless-stopped \
+  --network host \
+  -e GITEA_INSTANCE_URL="{gitea_info['url']}" \
+  -e GITEA_RUNNER_REGISTRATION_TOKEN="{gitea_info['token']}" \
+  -e GITEA_RUNNER_NAME="{gitea_info['name']}" \
+  -e GITEA_RUNNER_LABELS="{labels_str}" \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v {volume_name}:/data \
+  gitea/act_runner:latest"""
     
-    # 拉取基础镜像
-    console.print(f"\n[cyan]首先拉取基础镜像: {base_image}[/]")
-    if not pull_single_image(base_image, "Flutter 基础镜像"):
-        console.print("[red]基础镜像拉取失败，无法继续构建[/]")
-        return
-    
-    # 构建增强版镜像
-    enhanced_image = build_enhanced_flutter_image(base_image, flutter_tag, enhanced_config)
-    
-    if enhanced_image and enhanced_image != base_image:
-        console.print(f"\n[bold green]✅ Flutter 增强版镜像构建完成！[/]")
-        console.print(f"[cyan]镜像标签: {enhanced_image}[/]")
-        console.print(f"[cyan]镜像大小: ", end="")
-        result = run(f"docker images {enhanced_image} --format '{{{{.Size}}}}'", capture=True)
-        if result.stdout:
-            console.print(result.stdout.strip())
+    try:
+        run(docker_cmd, capture=True)
+        return True
         
-        # 显示使用说明
-        show_flutter_image_usage(enhanced_image, flutter_tag, extra_packages)
+    except subprocess.CalledProcessError as e:
+        console.print(f"[bold red]❌ Runner 注册失败！[/]")
+        console.print(f"错误：{e.stderr[:500] if hasattr(e, 'stderr') and e.stderr else '未知错误'}")
+        return False
 
-# ==================== 模块 3: 仅下载 JDK 镜像 ====================
-def module_download_jdk_only():
-    """模块3：仅下载JDK多个版本镜像"""
+# ==================== 模块 2: 仅下载多个 Flutter 版本镜像 ====================
+def module_download_flutter_only() -> None:
+    """模块2：仅下载多个Flutter版本镜像"""
     console.print("\n" + "="*50)
-    console.print("[bold magenta]📥 模块3：仅下载 JDK 多个版本镜像[/]")
+    console.print("[bold magenta]📥 模块2：仅下载多个 Flutter 版本镜像[/]")
     
-    jdk_images = [
-        ("JDK 8 (Java 8)", "eclipse-temurin:8-jdk-jammy"),
-        ("JDK 11 (Java 11)", "eclipse-temurin:11-jdk-jammy"),
-        ("JDK 17 (Java 17)", "eclipse-temurin:17-jdk-jammy"),
-        ("JDK 21 (Java 21)", "eclipse-temurin:21-jdk-jammy"),
-    ]
+    console.print("\n[bold yellow]📦 Flutter 版本配置：[/]")
+    console.print("[cyan]请输入要下载的 Flutter 版本（多个版本用空格、逗号或分号分隔）[/]")
+    console.print("[cyan]📝 支持格式示例: '3.35.7, 3.38.5, latest; 3.22.7'[/]")
+    console.print("[cyan]💡 'latest' 会自动转换为 'stable' 标签（获取最新稳定版）[/]")
+    console.print(f"[cyan]🔧 默认版本: {', '.join(DEFAULT_FLUTTER_VERSIONS)}[/]")
     
-    # 让用户选择要下载的版本
-    console.print("\n[bold yellow]选择要下载的 JDK 版本：[/]")
-    table = Table(title="JDK 镜像列表")
-    table.add_column("编号", style="cyan")
-    table.add_column("JDK 版本", style="green")
-    table.add_column("镜像标签", style="yellow")
+    flutter_input = Prompt.ask("Flutter 版本", default=",".join(DEFAULT_FLUTTER_VERSIONS))
+    flutter_versions = parse_multi_version_input(flutter_input, DEFAULT_FLUTTER_VERSIONS)
     
-    for i, (name, image) in enumerate(jdk_images, 1):
-        table.add_row(str(i), name, image)
+    console.print(f"\n[bold cyan]📋 准备下载以下 Flutter 版本：[/]")
+    for i, version in enumerate(flutter_versions, 1):
+        validated = validate_flutter_version(version)
+        console.print(f"{i}. Flutter {version} → ghcr.io/cirruslabs/flutter:{validated}")
     
-    console.print(table)
-    
-    console.print("\n[cyan]输入要下载的编号（多个用逗号分隔，或输入 all 下载全部）：[/]")
-    choice_input = Prompt.ask("选择", default="all").strip()
-    
-    if choice_input.lower() == 'all':
-        selected = list(range(1, len(jdk_images) + 1))
-    else:
-        selected = []
-        for part in choice_input.split(','):
-            part = part.strip()
-            if part.isdigit() and 1 <= int(part) <= len(jdk_images):
-                selected.append(int(part))
-    
-    if not selected:
-        console.print("[red]未选择任何镜像，取消操作[/]")
+    if not Confirm.ask("\n确认下载以上镜像？", default=True):
+        console.print("[yellow]取消下载[/]")
         return
     
-    # 下载选中的镜像
+    # 下载镜像
     failed = []
-    for idx in selected:
-        name, image = jdk_images[idx-1]
-        console.print(f"\n[yellow]正在下载: {name}[/]")
-        if not pull_single_image(image, name):
-            failed.append((name, image))
+    for version in flutter_versions:
+        validated = validate_flutter_version(version)
+        image_name = f"ghcr.io/cirruslabs/flutter:{validated}"
+        display_name = f"Flutter {version} (ghcr.io/cirruslabs/flutter:{validated})"
+        
+        console.print(f"\n[yellow]正在下载: {display_name}[/]")
+        if not pull_single_image(image_name, f"Flutter {version}"):
+            failed.append((f"Flutter {version}", image_name))
     
     # 显示结果
     console.print("\n" + "="*50)
     if failed:
-        console.print(f"[yellow]部分镜像下载失败 ({len(failed)}/{len(selected)})[/]")
+        console.print(f"[yellow]部分镜像下载失败 ({len(failed)}/{len(flutter_versions)})[/]")
         for name, image in failed:
             console.print(f"[red]❌ {name}: {image}[/]")
     else:
         console.print("[bold green]✅ 所有选中镜像下载完成！[/]")
     
-    # 显示已下载的镜像
+    # 显示已下载的 Flutter 镜像
+    console.print("\n[bold cyan]📋 已下载的 Flutter 镜像：[/]")
+    result = run("docker images ghcr.io/cirruslabs/flutter* --format 'table {{.Repository}}:{{.Tag}}\t{{.Size}}'", capture=True)
+    if result.stdout:
+        console.print(result.stdout)
+    else:
+        console.print("[yellow]未找到 Flutter 镜像[/]")
+
+# ==================== 模块 3: 仅下载多个 JDK 版本镜像 ====================
+def module_download_jdk_only() -> None:
+    """模块3：仅下载多个JDK版本镜像"""
+    console.print("\n" + "="*50)
+    console.print("[bold magenta]📥 模块3：仅下载多个 JDK 版本镜像[/]")
+    
+    console.print("\n[bold yellow]📦 JDK 版本配置：[/]")
+    console.print("[cyan]请输入要下载的 JDK 版本（多个版本用空格、逗号或分号分隔）[/]")
+    console.print("[cyan]📝 支持格式示例: '8, 9, 11, 17, 21'[/]")
+    console.print("[cyan]💡 建议下载常用版本: 8, 11, 17, 21[/]")
+    console.print(f"[cyan]🔧 默认版本: {', '.join(DEFAULT_JAVA_VERSIONS)}[/]")
+    
+    jdk_input = Prompt.ask("JDK 版本", default=",".join(DEFAULT_JAVA_VERSIONS))
+    jdk_versions = parse_multi_version_input(jdk_input, DEFAULT_JAVA_VERSIONS)
+    
+    console.print(f"\n[bold cyan]📋 准备下载以下 JDK 版本：[/]")
+    for i, version in enumerate(jdk_versions, 1):
+        validated = validate_java_version(version)
+        console.print(f"{i}. JDK {version} → eclipse-temurin:{validated}-jdk-jammy")
+    
+    if not Confirm.ask("\n确认下载以上镜像？", default=True):
+        console.print("[yellow]取消下载[/]")
+        return
+    
+    # 下载镜像
+    failed = []
+    for version in jdk_versions:
+        validated = validate_java_version(version)
+        image_name = f"eclipse-temurin:{validated}-jdk-jammy"
+        display_name = f"JDK {version} (eclipse-temurin:{validated}-jdk-jammy)"
+        
+        console.print(f"\n[yellow]正在下载: {display_name}[/]")
+        if not pull_single_image(image_name, f"JDK {version}"):
+            failed.append((f"JDK {version}", image_name))
+    
+    # 显示结果
+    console.print("\n" + "="*50)
+    if failed:
+        console.print(f"[yellow]部分镜像下载失败 ({len(failed)}/{len(jdk_versions)})[/]")
+        for name, image in failed:
+            console.print(f"[red]❌ {name}: {image}[/]")
+    else:
+        console.print("[bold green]✅ 所有选中镜像下载完成！[/]")
+    
+    # 显示已下载的 JDK 镜像
     console.print("\n[bold cyan]📋 已下载的 JDK 镜像：[/]")
     result = run("docker images eclipse-temurin* --format 'table {{.Repository}}:{{.Tag}}\t{{.Size}}'", capture=True)
     if result.stdout:
@@ -252,25 +419,32 @@ def module_download_jdk_only():
     else:
         console.print("[yellow]未找到 eclipse-temurin 镜像[/]")
 
-# ==================== 模块 4: 仅下载 Ubuntu 镜像 ====================
-def module_download_ubuntu_only():
-    """模块4：仅下载Ubuntu-Latest镜像"""
+# ==================== 模块 4: 仅下载 Ubuntu-Latest 工具镜像 ====================
+def module_download_ubuntu_only() -> None:
+    """模块4：仅下载Ubuntu-Latest工具镜像"""
     console.print("\n" + "="*50)
-    console.print("[bold magenta]📥 模块4：仅下载 Ubuntu-Latest 镜像[/]")
+    console.print("[bold magenta]📥 模块4：仅下载 Ubuntu-Latest 工具镜像[/]")
     
     ubuntu_image = "catthehacker/ubuntu:act-latest"
     
-    console.print(f"\n[cyan]准备下载镜像: {ubuntu_image}[/]")
-    console.print("[yellow]这个镜像包含：[/]")
-    console.print("• 完整的 Ubuntu 基础环境")
-    console.print("• 预装了常用的开发工具")
-    console.print("• 兼容大多数 GitHub Actions")
+    console.print(f"\n[bold cyan]📦 镜像详情：[/]")
+    console.print(f"镜像名称: {ubuntu_image}")
+    console.print("\n[bold yellow]🔧 包含的完整工具链：[/]")
+    console.print("• 📦 Ubuntu 22.04 LTS (Jammy Jellyfish) 基础环境")
+    console.print("• 🐍 Python 3.10+ 和 pip")
+    console.print("• 📦 Node.js 和 npm")
+    console.print("• 🐙 Git 和 GitHub CLI")
+    console.print("• 🔨 GNU 开发工具链 (gcc, g++, make, cmake)")
+    console.print("• 🐳 Docker CLI 和容器工具")
+    console.print("• 📦 常用开发库和依赖")
+    console.print("• 🔄 兼容大多数 GitHub Actions 工作流")
+    console.print("\n[cyan]💡 这个镜像是专门为 GitHub Actions 兼容性优化的完整开发环境[/]")
     
     if not Confirm.ask("\n确认下载此镜像？", default=True):
         console.print("[yellow]取消下载[/]")
         return
     
-    success = pull_single_image(ubuntu_image, "Ubuntu-Latest 基础环境")
+    success = pull_single_image(ubuntu_image, "Ubuntu-Latest 工具镜像")
     
     if success:
         console.print("\n[bold green]✅ 镜像下载完成！[/]")
@@ -278,9 +452,13 @@ def module_download_ubuntu_only():
         result = run(f"docker images {ubuntu_image} --format 'table {{.Repository}}:{{.Tag}}\\t{{.Size}}\\t{{.CreatedAt}}'", capture=True)
         if result.stdout:
             console.print(result.stdout)
+        
+        console.print("\n[bold yellow]📝 使用说明：[/]")
+        console.print("在 workflow 中配置: [green]runs-on: ubuntu-latest[/]")
+        console.print("Runner 会自动使用此镜像执行任务")
 
 # ==================== 模块 5: 仅注册 Runner ====================
-def module_register_runner_only():
+def module_register_runner_only() -> None:
     """模块5：仅注册Runner（不下载镜像）"""
     console.print("\n" + "="*50)
     console.print("[bold magenta]🚀 模块5：仅注册 Runner（快速模式）[/]")
@@ -291,24 +469,43 @@ def module_register_runner_only():
     # 获取 Gitea 信息
     gitea_info = get_gitea_info()
     
-    # 处理 Flutter 镜像
-    flutter_image = handle_flutter_image(gitea_info)
+    console.print("\n[bold yellow]📦 配置 Runner 支持的标签[/]")
+    console.print("[cyan]请输入支持的 Java 版本（多个版本用空格、逗号或分号分隔）[/]")
+    java_input = Prompt.ask("Java 版本", default=",".join(DEFAULT_JAVA_VERSIONS))
+    java_versions = parse_multi_version_input(java_input, DEFAULT_JAVA_VERSIONS)
+    
+    console.print("\n[cyan]请输入支持的 Flutter 版本（多个版本用空格、逗号或分号分隔）[/]")
+    flutter_input = Prompt.ask("Flutter 版本", default=",".join(DEFAULT_FLUTTER_VERSIONS))
+    flutter_versions = parse_multi_version_input(flutter_input, DEFAULT_FLUTTER_VERSIONS)
+    
+    console.print("\n[cyan]是否支持 Ubuntu-Latest？[/]")
+    support_ubuntu = Confirm.ask("支持 Ubuntu-Latest", default=True)
     
     # 直接注册 Runner
-    success, container_name, flutter_label, _ = register_runner(gitea_info, flutter_image)
+    success = register_runner_with_versions(gitea_info, java_versions, flutter_versions, support_ubuntu)
     
     if success:
         console.print("\n[bold green]✅ Runner 注册成功！[/]")
-        console.print(f"[cyan]容器名称: {container_name}[/]")
-        console.print(f"[cyan]支持标签: ubuntu-latest, java-8/11/17/21, {flutter_label}[/]")
+        
+        # 构建支持的标签列表
+        tags = []
+        if support_ubuntu:
+            tags.append("ubuntu-latest")
+        for version in java_versions:
+            tags.append(f"java-{version}")
+        for version in flutter_versions:
+            validated = validate_flutter_version(version)
+            tags.append(f"flutter-{validated}" if validated != 'stable' else "flutter-stable")
+        
+        console.print(f"[cyan]支持的标签: {', '.join(tags)}[/]")
         
         # 显示管理命令
-        show_runner_management_commands(container_name, gitea_info['name'])
+        show_runner_management_commands(gitea_info['name'])
     else:
         console.print("[bold red]❌ Runner 注册失败[/]")
 
 # ==================== 模块 6: 管理现有 Runner ====================
-def module_manage_runners():
+def module_manage_runners() -> None:
     """模块6：管理现有Runner"""
     console.print("\n" + "="*50)
     console.print("[bold magenta]🔧 模块6：管理现有 Runner[/]")
@@ -338,7 +535,10 @@ def module_manage_runners():
     
     # 选择要管理的容器
     console.print("\n[cyan]输入要管理的容器编号（或输入 0 返回）：[/]")
-    choice = IntPrompt.ask("选择", default=0, choices=[str(i) for i in range(len(containers) + 1)])
+    try:
+        choice = IntPrompt.ask("选择", default=0)
+    except:
+        choice = 0
     
     if choice == 0:
         return
@@ -359,7 +559,10 @@ def module_manage_runners():
     console.print("6. 查看容器信息")
     console.print("7. 返回")
     
-    action = IntPrompt.ask("选择操作", default=1, choices=["1", "2", "3", "4", "5", "6", "7"])
+    try:
+        action = IntPrompt.ask("选择操作", default=1, choices=["1", "2", "3", "4", "5", "6", "7"])
+    except:
+        action = 1
     
     if action == 1:  # 查看日志
         console.print(f"[cyan]正在显示 {selected_container} 的日志（Ctrl+C 退出）...[/]")
@@ -415,309 +618,43 @@ def module_manage_runners():
         console.print("\n[cyan]环境变量：[/]")
         run(f"docker inspect {selected_container} --format '{{{{range .Config.Env}}}}{{{{.}}}}\n{{{{end}}}}'", check=False)
 
-# ==================== 公共函数（从原脚本提取） ====================
-def get_gitea_info():
-    """获取 Gitea 基本信息"""
-    console.print("\n[bold yellow]📋 Gitea 配置信息[/]")
-    
-    try:
-        result = run("hostname -I", capture=True, check=False)
-        if result.stdout:
-            ips = [ip.strip() for ip in result.stdout.split() if ip.strip()]
-            default_url = f"http://{ips[0]}:3000/"
-        else:
-            default_url = "http://localhost:3000/"
-    except:
-        default_url = "http://localhost:3000/"
-    
-    console.print(f"[cyan]自动检测到本地 IP，默认 URL: {default_url}[/]")
-    
-    gitea_url = Prompt.ask(
-        "Gitea 实例 URL (以 / 结尾)",
-        default=default_url
-    )
-    
-    if not gitea_url.endswith('/'):
-        gitea_url += '/'
-    
-    console.print("\n[bold yellow]🔑 获取 Registration Token：[/]")
-    console.print("1. 访问 Gitea 管理页面：")
-    console.print(f"   [blue]{gitea_url}admin/actions/runners[/]")
-    console.print("2. 点击 'Create new runner'")
-    console.print("3. 复制生成的 Token\n")
-    
-    token = Prompt.ask("粘贴 Registration Token", default="oRyijO9he0A7cNWU6YT4YiDGemOljPn64ynMkMTq")
-    
-    runner_name = Prompt.ask("Runner 名称", default="my-runner")
-    
-    console.print("\n[bold yellow]Flutter 版本配置：[/]")
-    console.print("[cyan]输入版本号（如 3.35.7），默认 3.35.7（稳定推荐）[/]")
-    console.print("[cyan]输入 'stable' 或 'latest' 使用最新稳定版[/]")
-    flutter_version = Prompt.ask("Flutter 版本", default="3.35.7").strip().lower()
-    
-    # 询问是否构建增强版镜像
-    console.print("\n[bold yellow]🛠️  Flutter 镜像增强选项：[/]")
-    console.print("[cyan]原始镜像缺少 Python 和 Node.js 工具，建议构建增强版[/]")
-    build_enhanced = Confirm.ask("是否构建增强版 Flutter 镜像？", default=True)
-    
-    if build_enhanced:
-        console.print("\n[bold yellow]📦 增强版镜像配置：[/]")
-        include_all = Confirm.ask("安装所有推荐的 Python 包和工具？", default=True)
-        
-        if not include_all:
-            console.print("[cyan]选择 Python 包：[/]")
-            include_requests = Confirm.ask("安装 requests 包？", default=True)
-            include_semver = Confirm.ask("安装 semver 包？", default=True)
-            include_yaml = Confirm.ask("安装 PyYAML 包？", default=True)
-            include_jsonschema = Confirm.ask("安装 jsonschema 包？", default=True)
-        else:
-            include_requests = include_semver = include_yaml = include_jsonschema = True
-            
-        extra_packages = []
-        if include_requests: extra_packages.append("requests")
-        if include_semver: extra_packages.append("semver")
-        if include_yaml: extra_packages.append("pyyaml")
-        if include_jsonschema: extra_packages.append("jsonschema")
-        
-        enhanced_config = {
-            "enabled": True,
-            "extra_packages": extra_packages,
-            "install_all": include_all
-        }
-    else:
-        enhanced_config = {"enabled": False}
-    
-    return {
-        "url": gitea_url,
-        "token": token,
-        "name": runner_name,
-        "flutter_version": flutter_version,
-        "enhanced_config": enhanced_config
-    }
-
-def pull_single_image(image_name, display_name=None):
-    """拉取单个镜像"""
-    name = display_name or image_name
-    console.print(f"[yellow]拉取: {name} ({image_name})[/]")
-    
-    try:
-        with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}")) as progress:
-            task = progress.add_task("拉取中...", total=None)
-            run(f"docker pull {image_name}", capture=True)
-            progress.update(task, completed=True)
-        
-        console.print(f"[green]✅ {name} 拉取成功[/]")
-        return True
-        
-    except subprocess.CalledProcessError as e:
-        console.print(f"[red]❌ {name} 拉取失败[/]")
-        console.print(f"[yellow]错误: {e.stderr[:200] if hasattr(e, 'stderr') and e.stderr else '未知错误'}[/]")
-        return False
-
-def build_enhanced_flutter_image(base_image: str, version_tag: str, config: dict) -> str:
-    """构建增强版 Flutter 镜像"""
-    console.print(f"\n[bold yellow]🔨 开始构建增强版 Flutter 镜像[/]")
-    console.print(f"[cyan]基础镜像: {base_image}[/]")
-    
-    # 创建临时 Dockerfile
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.Dockerfile', delete=False) as f:
-        dockerfile_content = f"""FROM {base_image}
-
-# 设置非交互式安装环境
-ENV DEBIAN_FRONTEND=noninteractive
-
-# 更新包列表并安装基础工具
-RUN apt-get update && apt-get install -y \\
-    curl \\
-    wget \\
-    git \\
-    unzip \\
-    zip \\
-    sudo \\
-    ca-certificates \\
-    software-properties-common \\
-    && rm -rf /var/lib/apt/lists/*
-
-# 安装 Python 3 和 pip
-RUN apt-get update && apt-get install -y \\
-    python3 \\
-    python3-pip \\
-    python3-venv \\
-    && ln -sf /usr/bin/python3 /usr/bin/python \\
-    && python3 -m pip install --upgrade pip setuptools wheel
-
-# 安装 Node.js (最新 LTS 版本)
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \\
-    && apt-get install -y nodejs \\
-    && npm install -g npm@latest
-
-# 清理缓存
-RUN apt-get autoremove -y && apt-get clean
-"""
-        
-        # 添加 Python 包安装
-        if config.get("install_all", True):
-            dockerfile_content += """RUN pip3 install --no-cache-dir \\
-    requests \\
-    semver \\
-    pyyaml \\
-    jsonschema \\
-    python-dateutil \\
-    pytz \\
-    colorama \\
-    tqdm \\
-    docker
-"""
-        elif config.get("extra_packages"):
-            packages = " \\\n    ".join(config["extra_packages"])
-            dockerfile_content += f"RUN pip3 install --no-cache-dir \\\n    {packages}\n"
-        
-        # 添加环境变量和验证
-        dockerfile_content += """
-# 设置环境变量
-ENV PATH="/flutter/bin:/flutter/bin/cache/dart-sdk/bin:$PATH"
-ENV FLUTTER_ROOT="/flutter"
-ENV PUB_CACHE="/flutter/.pub-cache"
-
-# 验证安装
-RUN python3 --version && pip3 --version && node --version && npm --version
-RUN flutter --version && dart --version
-
-# 设置工作目录
-WORKDIR /workspace
-"""
-        
-        f.write(dockerfile_content)
-        dockerfile_path = f.name
-    
-    enhanced_image = f"local/flutter-enhanced:{version_tag}"
-    
-    try:
-        with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}")) as progress:
-            task = progress.add_task("构建镜像中...", total=None)
-            
-            # 构建镜像
-            build_cmd = f"docker build -f {dockerfile_path} -t {enhanced_image} ."
-            result = run(build_cmd, capture=True)
-            
-            progress.update(task, completed=True)
-        
-        console.print(f"[bold green]✅ 增强版镜像构建成功！[/]")
-        return enhanced_image
-        
-    except subprocess.CalledProcessError as e:
-        console.print(f"[bold red]❌ 镜像构建失败！[/]")
-        console.print(f"[red]错误信息：{e.stderr[:500] if hasattr(e, 'stderr') and e.stderr else '未知错误'}[/]")
-        console.print("[yellow]将使用原始镜像[/]")
-        return base_image
-    finally:
-        # 清理临时文件
-        if os.path.exists(dockerfile_path):
-            os.unlink(dockerfile_path)
-
-def handle_flutter_image(gitea_info):
-    """处理 Flutter 镜像（构建或使用原始镜像）"""
-    flutter_input = gitea_info['flutter_version']
-    if flutter_input in ['latest', 'stable']:
-        flutter_tag = "stable"
-    else:
-        flutter_tag = flutter_input
-    
-    base_flutter_image = f"ghcr.io/cirruslabs/flutter:{flutter_tag}"
-    
-    if gitea_info['enhanced_config']['enabled']:
-        # 构建增强版镜像
-        enhanced_image = build_enhanced_flutter_image(
-            base_flutter_image, 
-            flutter_tag,
-            gitea_info['enhanced_config']
-        )
-        return enhanced_image
-    else:
-        return base_flutter_image
-
-def register_runner(gitea_info, flutter_image):
-    """注册 Runner 到 Gitea"""
-    runner_name = gitea_info['name']
-    container_name = f"gitea-{runner_name}"
-    volume_name = f"gitea-runner-data-{runner_name}"
-    
-    # 检查并清理同名容器
-    result = run(f"docker ps -a --filter name=^{container_name}$ --format '{{{{.Names}}}}'", capture=True, check=False)
-    if result.stdout.strip() == container_name:
-        if Confirm.ask(f"已存在容器 '{container_name}'，是否删除并重新创建？", default=True):
-            run(f"docker stop {container_name}", check=False)
-            run(f"docker rm {container_name}", check=False)
-        else:
-            console.print("[yellow]跳过注册，使用现有容器[/]")
-            return False, container_name, None, None
-    
-    # Flutter 标签处理
-    flutter_input = gitea_info['flutter_version']
-    if flutter_input in ['latest', 'stable']:
-        flutter_label = "flutter-stable"
-    else:
-        flutter_label = f"flutter-{flutter_input}"
-    
-    flutter_label_entry = f"{flutter_label}:docker://{flutter_image}"
-    
-    # 所有标签
-    labels = (
-        "ubuntu-latest:docker://catthehacker/ubuntu:act-latest,"
-        "java-8:docker://eclipse-temurin:8-jdk-jammy,"
-        "java-11:docker://eclipse-temurin:11-jdk-jammy,"
-        "java-17:docker://eclipse-temurin:17-jdk-jammy,"
-        "java-21:docker://eclipse-temurin:21-jdk-jammy,"
-        f"{flutter_label_entry}"
-    )
-    
-    # 创建持久化卷
-    run(f"docker volume create {volume_name}", check=False)
-    
-    # 启动容器
-    console.print(f"[cyan]启动 Runner 容器：{container_name}[/]")
-    
-    docker_cmd = f"""docker run -d \\
-  --name {container_name} \\
-  --restart unless-stopped \\
-  --network host \\
-  -e GITEA_INSTANCE_URL="{gitea_info['url']}" \\
-  -e GITEA_RUNNER_REGISTRATION_TOKEN="{gitea_info['token']}" \\
-  -e GITEA_RUNNER_NAME="{gitea_info['name']}" \\
-  -e GITEA_RUNNER_LABELS="{labels}" \\
-  -v /var/run/docker.sock:/var/run/docker.sock \\
-  -v {volume_name}:/data \\
-  gitea/act_runner:latest"""
-    
-    try:
-        run(docker_cmd, capture=True)
-        return True, container_name, flutter_label, flutter_image
-        
-    except subprocess.CalledProcessError as e:
-        console.print(f"[bold red]❌ Runner 注册失败！[/]")
-        console.print(f"错误：{e.stderr[:500] if hasattr(e, 'stderr') and e.stderr else '未知错误'}")
-        return False, container_name, flutter_label, flutter_image
-
-def show_runner_summary(container_name, runner_name, flutter_label, failed_images):
+# ==================== 辅助函数 ====================
+def show_runner_summary(runner_name: str, java_versions: List[str], 
+                       flutter_versions: List[str], failed_images: List[Tuple[str, str]]) -> None:
     """显示 Runner 安装摘要"""
+    container_name = f"gitea-{runner_name}"
+    
     console.print("\n" + "="*50)
-    console.print(Panel.fit(
+    
+    # 构建支持的标签列表
+    tags = ["ubuntu-latest"]
+    for version in java_versions:
+        tags.append(f"java-{version}")
+    for version in flutter_versions:
+        validated = validate_flutter_version(version)
+        tags.append(f"flutter-{validated}" if validated != 'stable' else "flutter-stable")
+    
+    summary_panel = Panel.fit(
         f"[bold green]🎉 Runner 安装完成！[/]\n\n"
         f"容器名称: [cyan]{container_name}[/]\n"
         f"持久化卷: [cyan]gitea-runner-data-{runner_name}[/]\n"
-        f"支持标签: [yellow]ubuntu-latest, java-8/11/17/21, {flutter_label}[/]",
+        f"支持的标签: [yellow]{', '.join(tags)}[/]",
         title="安装成功", border_style="green"
-    ))
+    )
+    
+    console.print(summary_panel)
     
     if failed_images:
         console.print("\n[yellow]💡 以下镜像拉取失败（首次使用时自动拉取）：[/]")
         for name, image in failed_images:
             console.print(f"[yellow]• {name}: {image}[/]")
     
-    show_runner_management_commands(container_name, runner_name)
+    show_runner_management_commands(runner_name)
 
-def show_runner_management_commands(container_name, runner_name):
+def show_runner_management_commands(runner_name: str) -> None:
     """显示 Runner 管理命令"""
+    container_name = f"gitea-{runner_name}"
+    
     console.print("\n[bold cyan]🔧 管理命令：[/]")
     console.print(f"查看日志: [green]docker logs -f {container_name}[/]")
     console.print(f"重启: [green]docker restart {container_name}[/]")
@@ -726,34 +663,8 @@ def show_runner_management_commands(container_name, runner_name):
     console.print(f"删除卷: [green]docker volume rm gitea-runner-data-{runner_name}[/]")
     console.print(f"查看状态: [green]docker ps --filter name={container_name}[/]")
 
-def show_flutter_image_usage(image_name, version_tag, packages):
-    """显示 Flutter 镜像使用说明"""
-    console.print("\n[bold cyan]📝 Flutter 增强版镜像使用说明：[/]")
-    console.print(f"1. 镜像标签: [green]{image_name}[/]")
-    console.print(f"2. Flutter 版本: [green]{version_tag}[/]")
-    console.print(f"3. 预装工具: Python3, pip, Node.js, npm, npx")
-    if packages:
-        console.print(f"4. 预装 Python 包: {', '.join(packages)}")
-    
-    console.print("\n[bold yellow]在 Gitea workflow 中使用：[/]")
-    console.print(f"""```yaml
-jobs:
-  build:
-    runs-on: flutter-{version_tag}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Check tools
-        run: |
-          python3 --version
-          pip3 --version  
-          node --version
-          flutter --version
-      - name: Build project
-        run: flutter build apk --release
-```""")
-
 # ==================== 主程序 ====================
-def main():
+def main() -> None:
     """主函数"""
     try:
         check_root()
@@ -766,15 +677,15 @@ def main():
                 module_complete_installation()
                 
             elif choice == 2:
-                # 模块2: 仅编译安装Flutter镜像
-                module_build_flutter_only()
+                # 模块2: 仅下载多个Flutter版本镜像
+                module_download_flutter_only()
                 
             elif choice == 3:
-                # 模块3: 仅下载JDK多个版本镜像
+                # 模块3: 仅下载多个JDK版本镜像
                 module_download_jdk_only()
                 
             elif choice == 4:
-                # 模块4: 仅下载Ubuntu-Latest镜像
+                # 模块4: 仅下载Ubuntu-Latest工具镜像
                 module_download_ubuntu_only()
                 
             elif choice == 5:
