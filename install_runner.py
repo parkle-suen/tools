@@ -334,34 +334,36 @@ def register_runner_with_versions(gitea_info: Dict[str, Any], temurin_versions: 
     # 启动容器
     console.print(f"[cyan]启动 Runner 容器：{container_name}[/]")
     
-    proxy_host = "192.168.0.8"
-    proxy_port = "10809"
-    http_proxy_url = f"http://{proxy_host}:{proxy_port}"
-    socks_url = f"socks5://{proxy_host}:{proxy_port}" # 建议显式写 socks5
+    # proxy_host = "192.168.0.8"
+    # proxy_port = "10809"
+    # http_proxy_url = f"http://{proxy_host}:{proxy_port}"
+    # socks_url = f"socks5://{proxy_host}:{proxy_port}" # 建议显式写 socks5
     # 修正 no_proxy，建议使用更标准的 /16 或直接列出 Gitea IP
-    no_proxy_val = "localhost,127.0.0.1,192.168.0.169,192.168.0.0/16"
+    # no_proxy_val = "localhost,127.0.0.1,192.168.0.169,192.168.0.0/16"
     
     # 2. 构造给 Job 容器使用的环境变量字符串 (内部引号要注意)
     # 这里的单引号是给 Shell 看的，确保 options 里的多个 -e 被当作一个整体传给 GITEA_RUNNER
-    job_env_options = (
-    f"-e http_proxy='{http_proxy_url}' "
-    f"-e https_proxy='{http_proxy_url}' "
-    f"-e socks_proxy='{socks_url}' "
-    f"-e no_proxy='{no_proxy_val}' "
-    )
-    
+    # job_env_options = (
+    # f"-e http_proxy='{http_proxy_url}' "
+    # f"-e https_proxy='{http_proxy_url}' "
+    # f"-e socks_proxy='{socks_url}' "
+    # f"-e no_proxy='{no_proxy_val}' "
+    # )
+
+
+
+    # -e http_proxy='{http_proxy_url}' \\
+    # -e https_proxy='{http_proxy_url}' \\
+    # -e socks_proxy='{socks_url}' \\
+    # -e no_proxy='{no_proxy_val}' \\    
+    # -e GITEA_RUNNER_CONTAINER_OPTIONS='{job_env_options}' \\
 
     # 3. 最终的 Docker 命令
     docker_cmd = f"""docker run -d \\
     --name {container_name} \\
     --restart unless-stopped \\
     --network host \\
-    -e http_proxy='{http_proxy_url}' \\
-    -e https_proxy='{http_proxy_url}' \\
-    -e socks_proxy='{socks_url}' \\
-    -e no_proxy='{no_proxy_val}' \\
     -e GITEA_RUNNER_CONTAINER_NETWORK_MODE=host \\
-    -e GITEA_RUNNER_CONTAINER_OPTIONS='{job_env_options}' \\
     -e GITEA_INSTANCE_URL="{gitea_info['url']}" \\
     -e GITEA_RUNNER_REGISTRATION_TOKEN="{gitea_info['token']}" \\
     -e GITEA_RUNNER_NAME="{gitea_info['name']}" \\
