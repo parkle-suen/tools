@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gitea Popular Runner 管理工具 - 优化增强版
+只适合国外网络环境-Gitea Popular Runner 管理工具 - 优化增强版
 支持多版本批量下载和灵活配置，包含 Amazon Corretto JDK
 """
 
