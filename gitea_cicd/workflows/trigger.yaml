@@ -7,12 +7,13 @@ on:
 
 jobs:
   execute-pipeline:
-    runs-on: [flutter-stable,java-8,java-11,java-17,java-21,ubuntu-latest]  # 匹配您的自建多标签 Runner
+    # runs-on: [flutter-3.35.7,java-8,java-11,java-17,java-21,ubuntu-latest]  # 匹配您的自建多标签 Runner
+    runs-on: [flutter-3.35.7]  # 匹配您的自建多标签 Runner
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # 支持完整历史查询（如版本计算）
+      # - name: Checkout code
+      #   uses: actions/checkout@v4
+      #   with:
+      #     fetch-depth: 0  # 支持完整历史查询（如版本计算）
 
       - name: Prepare & Execute Pipeline
         env:
@@ -27,36 +28,61 @@ jobs:
           NTFY_TOPIC: "169"
 
         run: |
+          echo ""
           echo "🐍 初始化 Python 环境与依赖..."
 
-          # --- 升级 pip（推荐） ---
-          python3 -m pip install --upgrade pip -q
+          # ── 设置 PyPI 国内镜像加速 ─────────────────────────────────────
+          export PIP_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"
+          export PIP_TRUSTED_HOST="pypi.tuna.tsinghua.edu.cn"
+          export PIP_NO_CACHE_DIR=1  # 可选：禁用缓存，进一步减少磁盘占用
 
-          # --- 步骤1：安装 .ci/requirements.txt（如果存在） ---
+          # ── 暴力确保 pip 可用 ───────────────────────────────────────────
+          echo "🔧 尝试安装/修复 pip..."
+
+          # 方案A：apt 安装系统级 pip
+          sudo apt-get update -qq && \
+          sudo apt-get install -y python3-pip python3-venv || echo "apt install pip failed, trying fallback"
+
+          # 方案B：get-pip.py 强制安装
+          if ! python3 -m pip --version >/dev/null 2>&1; then
+            echo "⚠️ 系统 pip 不可用，强制使用 get-pip.py..."
+            curl -sSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py && \
+            sudo python3 /tmp/get-pip.py --force-reinstall && \
+            rm -f /tmp/get-pip.py
+          fi
+
+          # 升级 pip（关键：添加 --break-system-packages 避免 PEP 668）
+          python3 -m pip install --upgrade pip -q --break-system-packages || echo "⚠️ pip upgrade failed, continuing..."
+
+          echo "pip status check:"
+          python3 -m pip --version
+
+          # ── 安装项目依赖（如果存在 requirements.txt） ───────────────────
           REQ_FILE=".ci/requirements.txt"
           if [ -f "$REQ_FILE" ]; then
             echo "📦 发现 requirements.txt，正在安装项目自定义依赖..."
-            python3 -m pip install -r "$REQ_FILE" -q --break-system-packages || true
+            python3 -m pip install -r "$REQ_FILE" --break-system-packages || true
           else
             echo "⚠️ 未找到 .ci/requirements.txt，跳过项目依赖安装"
           fi
 
-          # --- 步骤2：安装额外固定依赖（始终执行） ---
+          # ── 安装额外固定依赖（始终执行） ───────────────────────────────
           EXTRA_PACKAGES="requests semver"  # 可在此直接添加/删除常用包
           if [ -n "$EXTRA_PACKAGES" ]; then
             echo "📦 安装额外固定依赖: $EXTRA_PACKAGES"
-            python3 -m pip install $EXTRA_PACKAGES -q --break-system-packages || true
+            python3 -m pip install $EXTRA_PACKAGES --break-system-packages || true
           fi
 
-          # --- 任务清单编排（顺序自由调整） ---
+          # ── 任务清单编排（顺序自由调整） ───────────────────────────────
           PIPELINE_STEPS=(
-            ".ci/check.py"         # 代码检查
-            ".ci/safe.py"          # 安全/漏洞扫描
-            ".ci/performance.py"   # 性能测试
-            ".ci/deploy.py"        # 部署
+            ".gitea/workflows/.ci/checkout.py"
+            ".gitea/workflows/.ci/check.py"         # 代码检查
+            ".gitea/workflows/.ci/safe.py"          # 安全/漏洞扫描
+            ".gitea/workflows/.ci/performance.py"   # 性能测试
+            ".gitea/workflows/.ci/deploy.py"        # 部署
           )
 
-          # --- 循环顺序执行 ---
+          # ── 循环顺序执行 ───────────────────────────────────────────────
           echo "🚀 开始按序执行脚本清单..."
           for script in "${PIPELINE_STEPS[@]}"; do
             if [ -f "$script" ]; then

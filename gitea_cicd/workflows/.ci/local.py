@@ -7,7 +7,7 @@ from core import perform_deploy
 #      生产环境或脚本提交到仓库时，请删除或注释掉默认 Token，避免泄露！
 DEFAULT_GITEA_API_URL = "http://192.168.0.169:3000"
 DEFAULT_TOKEN = "db52a5c2ee46e460a62a5244c9fd6cab8abe7f61"  # root/admin 最高权限 token
-DEFAULT_REPO = "root/soccer-app-2"
+DEFAULT_REPO = "root/soccer-app-test-ci"
 
 
 def input_with_default(prompt: str, default: str) -> str:
@@ -32,7 +32,7 @@ def main():
     gitea_token = token_input if token_input else DEFAULT_TOKEN
 
     gitea_repo = input_with_default(
-        "请输入仓库（owner/repo 格式，例如 root/soccer-app-2）",
+        "请输入仓库（owner/repo 格式，例如 root/soccer-app-test-ci）",
         DEFAULT_REPO
     )
 

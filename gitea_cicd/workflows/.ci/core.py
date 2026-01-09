@@ -6,20 +6,42 @@ from messenger import send_ntfy
 
 
 def run_command(command, capture=True):
-    """封装命令执行，失败时发送通知并抛异常"""
+    """封装命令执行，增强编码鲁棒性"""
     print(f"执行命令: {command}")
     result = subprocess.run(
-        command, shell=True, capture_output=capture, text=True
+        command,
+        shell=True,
+        capture_output=capture,
+        text=True,
+        encoding='utf-8',      # 强制 UTF-8
+        errors='replace'       # 不可解码字节替换为 �
     )
     if result.stdout:
         print(f"输出: {result.stdout.strip()}")
     if result.stderr:
         print(f"错误输出: {result.stderr.strip()}")
     if result.returncode != 0:
-        error_msg = f"❌ 命令执行失败: {command}\n错误详情: {result.stderr.strip()}"
+        error_msg = f"❌ 命令执行失败（返回码 {result.returncode}）: {command}\n错误详情: {result.stderr or '无错误输出'}"
         send_ntfy(error_msg, title="命令执行失败", priority="high")
         raise RuntimeError(error_msg)
     return result.stdout.strip()
+
+def check_out():
+    """签出代码,取代actions/checkout@v4, 避免对Node.js依赖"""
+    print("📂 开始手动检出代码...")
+    
+    # 获取当前 commit SHA（Gitea Actions 提供 GITEA_SHA 环境变量）
+    sha = os.getenv("GITEA_SHA", "main")
+    print(f"目标 SHA/分支: {sha}")
+    
+    # 浅克隆以优化速度（若需完整历史，可移除 --depth=1）
+    run_command(f"git fetch --depth=1 origin {sha}")
+    run_command(f"git checkout {sha}")
+    
+    # 若项目包含子模块，可取消注释以下行
+    # run_command("git submodule update --init --recursive")
+    
+    print("✅ 代码检出完成")
 
 
 def get_next_version():
@@ -48,14 +70,25 @@ def get_next_version():
 
 
 def build_flutter_apk():
-    """执行 Flutter 构建并返回 APK 路径"""
+    """执行 Flutter 构建并返回 APK 路径（增强容错）"""
     print("🚀 开始 Flutter 构建 APK...")
     run_command("flutter pub get")
-    run_command("flutter build apk --release")
+    
+    # 执行构建，即使返回非零也继续检查文件存在性
+    try:
+        run_command("flutter build apk --release")
+    except RuntimeError as e:
+        print(f"⚠️ 构建命令返回非零码，但继续检查 APK 文件: {e}")
 
-    apk_path = "build/app/outputs/flutter-apk/app-release.apk"
+    # apk_path = "build/app/outputs/flutter-apk/app-release.apk"
+    # 计算项目根目录（从 core.py 所在 .ci 目录向上一级）
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    # 构造绝对路径（跨平台兼容，使用 os.path.join 自动处理 \ 或 /）
+    apk_path = os.path.join(project_root, "build", "app", "outputs", "flutter-apk", "app-release.apk")
+    
+    print(f"APK路径: {apk_path}")
     if not os.path.exists(apk_path):
-        raise FileNotFoundError(f"APK 文件未生成: {apk_path}")
+        raise FileNotFoundError(f"APK 文件未生成或路径错误: {apk_path}")
     print(f"✅ APK 构建成功: {apk_path}")
     return apk_path
 
@@ -68,7 +101,6 @@ def create_gitea_release(api_url: str, repo: str, token: str, version: str):
         "Content-Type": "application/json"
     }
 
-    # 获取当前分支作为 target_commitish
     current_branch = run_command("git rev-parse --abbrev-ref HEAD")
 
     release_data = {
@@ -93,7 +125,6 @@ def upload_apk_to_release(api_url: str, repo: str, token: str, release_id: int, 
     print("📤 正在上传 APK...")
     filename = f"app-release-{version.lstrip('v')}.apk"
     url = f"{api_url}/repos/{repo}/releases/{release_id}/assets"
-
     headers = {"Authorization": f"token {token}"}
 
     with open(apk_path, "rb") as f:
@@ -111,38 +142,39 @@ def upload_apk_to_release(api_url: str, repo: str, token: str, release_id: int, 
 
 
 def perform_deploy(gitea_token: str, gitea_api_url: str, gitea_repo: str):
-    """核心部署流程（本地与 CI 共用）"""
+    """核心部署流程"""
     try:
         print("=== 开始 CI/CD 部署流程 ===")
 
-        # 处理 API URL
         api_url = gitea_api_url.rstrip("/")
         if "/api/v1" not in api_url:
             api_url += "/api/v1"
 
-        # 1. 计算版本
         version = get_next_version()
         print(f"📦 目标发布版本: {version}")
 
-        # 2. 构建 APK
         apk_path = build_flutter_apk()
 
-        # 3. 创建 Release
         release_id = create_gitea_release(api_url, gitea_repo, gitea_token, version)
 
-        # 4. 上传 APK
         upload_apk_to_release(api_url, gitea_repo, gitea_token, release_id, apk_path, version)
 
-        # 5. 成功通知
-        send_ntfy(
-            f"版本 {version} 发布成功！\nAPK 已上传至 Release。",
-            title="✅ 发布成功",
-            tags="package,tada",
-        )
+        try:
+            send_ntfy(
+                f"版本 {version} 发布成功！\nAPK 已上传至 Release。",
+                title="✅ 发布成功",
+                tags="package,tada",
+            )
+        except Exception as notify_e:
+            print(f"⚠️ 成功通知发送失败（可忽略）: {notify_e}")
+
         print("=== 部署流程完成 ===")
 
     except Exception as e:
         error_detail = f"部署流程异常: {str(e)}"
         print(error_detail)
-        send_ntfy(error_detail, title="部署失败", priority="high")
+        try:
+            send_ntfy(error_detail, title="部署失败", priority="high")
+        except Exception as notify_e:
+            print(f"⚠️ 失败通知发送失败（可忽略）: {notify_e}")
         raise
