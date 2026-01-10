@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Gitea Runner 物理机专用安装脚本 - 2026年1月修复版
-精准安装：OpenJDK 17 → Flutter → Gitea Runner
+Gitea Runner 物理机专用安装脚本 - 2026年1月修复版（ROOT专用版）
+精准安装：OpenJDK 17 → Flutter → Gitea Runner（全部使用root）
+仅适用于内部可信环境！
 """
 
 import subprocess
@@ -100,32 +101,9 @@ def check_requirements():
     rprint("系统要求检查通过", emoji="✅")
 
 
-def create_runner_user():
-    rprint("="*60, emoji="═")
-    rprint("步骤 1 : 创建专用用户 act_runner", style="bold blue")
-    rprint("="*60, emoji="═")
-
-    if run("id act_runner", check=False, shell=True).returncode == 0:
-        rprint("用户 act_runner 已存在", emoji="✅")
-        if not os.path.isdir("/home/act_runner"):
-            run("mkhomedir_helper act_runner", check=False, shell=True)
-        return True
-
-    run("groupadd act_runner 2>/dev/null || true", "创建组", shell=True)
-    run("useradd -m -s /bin/bash -g act_runner -G sudo act_runner", "创建用户", shell=True)
-
-    sudoers = "/etc/sudoers.d/99-act-runner"
-    with open(sudoers, "w") as f:
-        f.write("act_runner ALL=(ALL) NOPASSWD:ALL\n")
-    run(f"chmod 440 {sudoers}", "设置sudo免密")
-
-    rprint("act_runner 用户创建完成 + sudo免密", emoji="✅")
-    return True
-
-
 def install_openjdk17():
     rprint("="*60, emoji="═")
-    rprint("步骤 2 : 安装 OpenJDK 17", style="bold blue")
+    rprint("步骤 1 : 安装 OpenJDK 17", style="bold blue")
     rprint("="*60, emoji="═")
 
     if run("java -version 2>&1 | grep -q 'openjdk.*17'", check=False, shell=True).returncode == 0:
@@ -148,7 +126,7 @@ def install_openjdk17():
 
 def install_flutter():
     rprint("="*60, emoji="═")
-    rprint("步骤 3 : 安装 Flutter", style="bold blue")
+    rprint("步骤 2 : 安装 Flutter", style="bold blue")
     rprint("="*60, emoji="═")
 
     flutter_dir = "/opt/flutter"
@@ -167,7 +145,6 @@ def install_flutter():
 
     run(f"rm -rf {flutter_dir}", "清理旧目录")
     run(f"mkdir -p {flutter_dir}", "创建目录")
-    run(f"chown -R act_runner:act_runner {flutter_dir}")
 
     tar_file = f"/opt/flutter_linux_{ver}-stable.tar.xz"
 
@@ -178,7 +155,6 @@ def install_flutter():
         rprint(f"使用已存在的安装包：{tar_file}", emoji="♻️")
 
     run(f"tar xf {tar_file} -C {flutter_dir} --strip-components=1", "解压")
-    run(f"chown -R act_runner:act_runner {flutter_dir}", "修复权限")
 
     # 环境变量
     lines = [
@@ -193,14 +169,12 @@ def install_flutter():
 
     env_block = "\n".join(lines) + "\n"
 
-    for profile in ["/etc/profile.d/flutter.sh", "/home/act_runner/.profile"]:
+    for profile in ["/etc/profile.d/flutter.sh", "/root/.profile"]:
         try:
             with open(profile, "a") as f:
                 f.write(f"\n# Flutter {ver} - {time.strftime('%Y-%m-%d')}\n{env_block}")
             if profile.startswith("/etc"):
                 run(f"chmod 644 {profile}")
-            else:
-                run(f"chown act_runner:act_runner {profile}")
         except Exception as e:
             rprint(f"写入 {profile} 失败: {e}", style="yellow")
 
@@ -218,7 +192,7 @@ def install_flutter():
 
     # doctor
     rprint("执行 flutter doctor 检查...", emoji="🔍")
-    doctor = run(f"sudo -u act_runner {flutter_bin} doctor", capture=True, check=False, shell=True)
+    doctor = run(f"{flutter_bin} doctor", capture=True, check=False, shell=True)
 
     if doctor and doctor.returncode == 0:
         rprint("flutter doctor 输出：", emoji="📋")
@@ -229,7 +203,7 @@ def install_flutter():
     else:
         rprint("doctor 执行有非零退出码，但不影响使用", style="yellow")
 
-    # 修复root下不允许运行flutter.        
+    # 修复git的安全目录检查（只对root用户）
     fix_git_safe_directory()
 
     return True
@@ -238,19 +212,12 @@ def fix_git_safe_directory():
     """
     粗暴解决 git dubious ownership 问题：
     - root 用户信任所有 git 仓库
-    - act_runner 用户也信任所有 git 仓库
-    
-    在物理机/个人/可信内部 CI 环境下基本无害，
-    反正都是自己人玩，自己信得过就行。
     """
     rprint("正在永久关闭 git 的 'dubious ownership' 烦人检查...", style="bold yellow", emoji="💣")
 
     commands = [
         # root 信任所有目录
         ("git config --global --add safe.directory '*'", "root 用户"),
-        
-        # act_runner 信任所有目录
-        ("sudo -u act_runner git config --global --add safe.directory '*'", "act_runner 用户"),
     ]
 
     for cmd, who in commands:
@@ -269,7 +236,7 @@ def fix_git_safe_directory():
 
 def install_act_runner():
     rprint("="*60, emoji="═")
-    rprint("步骤 4 : 安装与注册 Gitea Actions Runner", style="bold blue")
+    rprint("步骤 3 : 安装与注册 Gitea Actions Runner（root模式）", style="bold blue")
     rprint("="*60, emoji="═")
 
     bin_path = "/usr/local/bin/act_runner"
@@ -287,15 +254,14 @@ def install_act_runner():
         run(f"curl -L -f -o /tmp/act_runner {url}", "下载 act_runner")
         run("mv /tmp/act_runner /usr/local/bin/act_runner")
         run("chmod 755 /usr/local/bin/act_runner")
-        run("chown act_runner:act_runner /usr/local/bin/act_runner")
 
     # =============================================
-    # 注册部分 - 关键修复：必须在 /home/act_runner 下执行
+    # 注册部分 - 关键：在 root 目录下执行
     # =============================================
-    rprint("准备注册 Runner（必须在用户家目录执行）", emoji="🔐")
+    rprint("准备注册 Runner（在 root 目录执行）", emoji="🔐")
 
     default_url = "http://192.168.0.169:3000"
-    default_token = "oRyijO9he0A7cNWU6YT4YiDGemOljPn64ynMkMTq"   # 记得生产环境改掉这个！
+    default_token = "oRyijO9he0A7cNWU6YT4YiDGemOljPn64ynMkMTq"
 
     rprint("Gitea 实例地址", emoji="🌐")
     gitea_url = input(f"请输入 Gitea 地址（默认 {default_url}）： ").strip() or default_url
@@ -310,7 +276,7 @@ def install_act_runner():
     else:
         rprint(f"→ 使用你输入的 token（前8位：{token[:8]}...）", style="italic cyan")
 
-    runner_name = input("Runner 名称 (默认 my-runner): ").strip() or "my-runner"
+    runner_name = input("Runner 名称 (默认 my-root-runner): ").strip() or "my-root-runner"
     labels = input("标签 (默认 ubuntu-latest,flutter,jdk17,docker): ").strip() or "ubuntu-latest,flutter,jdk17,docker"
 
     register_cmd = (
@@ -320,13 +286,13 @@ def install_act_runner():
     )
 
     rprint("清理旧注册文件...", emoji="🧹")
-    run("sudo -u act_runner rm -f /home/act_runner/.runner*", cwd="/home/act_runner", shell=True)
+    run("rm -f /root/.runner*", shell=True)
 
-    rprint("开始注册（重要：在 act_runner 家目录执行）...", emoji="📝")
+    rprint("开始注册（在 root 目录执行）...", emoji="📝")
 
-    # 核心修复：cd 到家目录再执行
+    # 核心修改：在 root 目录执行，不再使用 sudo
     reg_result = run(
-        f"sudo -u act_runner bash -c 'cd /home/act_runner && {register_cmd}'",
+        f"bash -c 'cd /root && {register_cmd}'",
         shell=True, check=False
     )
 
@@ -339,17 +305,17 @@ def install_act_runner():
         rprint("等待 3 秒后自动重试一次...", emoji="⏳")
         time.sleep(3)
         reg_result = run(
-            f"sudo -u act_runner bash -c 'cd /home/act_runner && {register_cmd}'",
+            f"bash -c 'cd /root && {register_cmd}'",
             shell=True, check=False
         )
         if reg_result.returncode == 0:
             rprint("重试注册成功！", style="bold green", emoji="🎉")
         else:
             rprint("仍然失败，请手动执行以下命令：", style="bold red")
-            rprint(f"  sudo -u act_runner bash -c 'cd /home/act_runner && {register_cmd}'")
+            rprint(f"  bash -c 'cd /root && {register_cmd}'")
 
-    # systemd 服务
-    rprint("生成 systemd 服务文件...", emoji="⚙️")
+    # systemd 服务（以 root 用户运行）
+    rprint("生成 systemd 服务文件（root用户）...", emoji="⚙️")
 
     java_home = ""
     jh_cmd = run("readlink -f $(which java) | sed 's:/bin/java::'", shell=True, check=False)
@@ -357,24 +323,20 @@ def install_act_runner():
         java_home = jh_cmd.stdout.strip()
 
     service = f"""[Unit]
-Description=Gitea Actions Runner
+Description=Gitea Actions Runner (Root Mode)
 After=network.target
 
 [Service]
 Type=simple
-User=act_runner
-Group=act_runner
-WorkingDirectory=/home/act_runner
+User=root
+Group=root
+WorkingDirectory=/root
 ExecStart=/usr/local/bin/act_runner daemon
 Restart=always
 RestartSec=5s
 Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/flutter/bin"
 Environment="JAVA_HOME={java_home}"
 Environment="FLUTTER_ROOT=/opt/flutter"
-
-NoNewPrivileges=yes
-ProtectSystem=full
-ReadWritePaths=/home/act_runner /opt/flutter
 
 [Install]
 WantedBy=multi-user.target
@@ -390,26 +352,40 @@ WantedBy=multi-user.target
     time.sleep(2)  # 给服务一点启动时间
     status = run("systemctl is-active gitea-runner.service", check=False, shell=True)
     if status and "active" in status.stdout:
-        rprint("Gitea Runner 服务已启动", emoji="✅")
+        rprint("Gitea Runner 服务已启动（root模式）", emoji="✅")
     else:
         rprint("服务启动可能有延迟或异常，请稍后检查 journalctl", style="yellow")
+        run("journalctl -u gitea-runner.service -n 20 --no-pager", check=False, shell=True)
 
 
 def main():
-    rprint("Gitea Runner 物理机专用安装脚本".center(60), style="bold magenta")
+    rprint("Gitea Runner 物理机专用安装脚本（ROOT专用版）".center(60), style="bold magenta")
+    rprint("⚠️  警告：此脚本使用 root 用户运行，仅适用于内部可信环境！".center(60), style="bold yellow")
     rprint("OpenJDK 17  +  Flutter  +  act_runner".center(60), style="dim")
     print()
 
-    if input("确认开始安装？(Y/n): ").strip().lower() not in ('', 'y'):
+    rprint("⚠️  重要警告：此配置仅适用于内部可信环境！", style="bold yellow", emoji="⚠️")
+    rprint("   - 将使用 root 用户运行所有 CI/CD 任务", style="yellow")
+    rprint("   - 完全绕过安全限制，便于调试和管理", style="yellow")
+    rprint("   - 不适用于生产环境或外网暴露环境", style="yellow")
+    print()
+
+    if input("确认开始安装？（输入 YES 继续）: ").strip().upper() != "YES":
+        rprint("安装已取消", style="bold red")
         return
 
     try:
         check_requirements()
-        create_runner_user()
+        # 跳过用户创建步骤，直接使用 root
+        rprint("跳过用户创建，直接使用 root 用户", emoji="⚡")
         install_openjdk17()
         install_flutter()
         install_act_runner()
-        rprint("安装流程执行完毕，建议重启 shell 或新开终端验证环境变量", style="bold cyan")
+        rprint("安装流程执行完毕！", style="bold green", emoji="🎉")
+        rprint("请重启 shell 或执行 'source /etc/profile' 更新环境变量", style="bold cyan")
+        print()
+        rprint("服务状态检查：systemctl status gitea-runner.service", style="dim")
+        rprint("日志查看：journalctl -u gitea-runner.service -f", style="dim")
     except Exception as e:
         rprint(f"安装过程中发生严重错误: {e}", style="bold red")
         sys.exit(1)
