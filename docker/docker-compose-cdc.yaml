@@ -1,3 +1,5 @@
+version: '3.9'
+
 services:
   redis:
     image: redis:8.0-alpine
@@ -7,7 +9,6 @@ services:
       - "6379:6379"
     volumes:
       - redis-data:/data
-    # 2026 生产建议：开启 AOF 以保证 CDC 偏移量不丢失（如果偏移量存 Redis 的话）
     command: >
       redis-server
       --requirepass 11111111
@@ -15,6 +16,8 @@ services:
       --maxmemory-policy allkeys-lru
       --appendonly yes
       --appendfsync everysec
+      --save 60 1
+      --loglevel warning
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "11111111", "ping"]
       interval: 5s
@@ -35,7 +38,6 @@ services:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
-    # 生产级 WAL 配置：增加 wal_keep_size 防止 CDC 链路断流
     command: >
       postgres
       -c wal_level=logical
@@ -43,6 +45,7 @@ services:
       -c max_wal_senders=10
       -c wal_keep_size=1024MB
       -c max_logical_replication_workers=10
+      -c listen_addresses='*'
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U user -d testdb"]
       interval: 5s
@@ -52,15 +55,14 @@ services:
       - app-network
 
   debezium:
-    image: debezium/server:latest
+    image: debezium/server:3.4.1.Final  # 2026年1月最新稳定版
     container_name: debezium
     restart: on-failure
     volumes:
       - ./debezium-conf/application.properties:/debezium/conf/application.properties:ro
       - debezium-data:/debezium/data
     environment:
-      - ENABLE_DEBEZIUM_SCRIPTING=true
-      # 2026 内存调优建议
+      - ENABLE_DEBEZIUM_SCRIPT | true
       - JAVA_OPTS=-Xmx1g -Xms1g -XX:+UseG1GC
     depends_on:
       postgres:
@@ -70,11 +72,11 @@ services:
     networks:
       - app-network
 
-networks:
-  app-network:
-    driver: bridge
-
 volumes:
   redis-data:
   postgres-data:
   debezium-data:
+
+networks:
+  app-network:
+    driver: bridge
