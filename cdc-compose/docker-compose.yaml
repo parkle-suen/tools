@@ -64,11 +64,11 @@ services:
       -c max_logical_replication_workers=10
       -c shared_preload_libraries='pg_stat_statements'
       -c listen_addresses='*'
-    # healthcheck:
-    #   test: ["CMD", "pg_isready"]
-    #   interval: 5s
-    #   timeout: 3s
-    #   retries: 10
+    healthcheck:
+      test: ["CMD", "pg_isready"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     networks:
       - app-network
     # 修正: 使用 mem_limit 替代 deploy.resources
