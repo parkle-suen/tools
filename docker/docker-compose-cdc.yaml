@@ -55,7 +55,7 @@ services:
       - app-network
 
   debezium:
-    image: debezium/server:3.4.1.Final  # 2026年1月最新稳定版
+    image: debezium/server:3.0.0.Final  # 2026年1月最新稳定版
     container_name: debezium
     restart: on-failure
     volumes:
