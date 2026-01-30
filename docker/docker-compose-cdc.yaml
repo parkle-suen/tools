@@ -26,6 +26,17 @@ services:
     networks:
       - app-network
 
+  redisinsight:
+    image: redis/redisinsight:latest
+    container_name: redisinsight
+    ports:
+      - "8001:8001"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - app-network
+
   postgres:
     image: postgres:18-alpine
     container_name: postgres
