@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
   redis:
     image: redis:8.0-alpine
@@ -54,7 +52,7 @@ services:
       - app-network
 
   debezium:
-    image: debezium/server:3.4
+    image: debezium/server:latest
     container_name: debezium
     restart: on-failure
     volumes:
