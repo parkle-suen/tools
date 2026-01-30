@@ -4,14 +4,14 @@ services:
   redis:
     image: redis:8.0-alpine
     container_name: redis
-    restart: always
+    restart: unless-stopped
     ports:
       - "6379:6379"
     volumes:
       - redis-data:/data
     command: >
       redis-server
-      --requirepass 11111111
+      --requirepass $${REDIS_PASSWORD}
       --maxmemory 2gb
       --maxmemory-policy allkeys-lru
       --appendonly yes
@@ -19,16 +19,19 @@ services:
       --save 60 1
       --loglevel warning
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "11111111", "ping"]
+      test: ["CMD", "redis-cli", "-a", "$${REDIS_PASSWORD}", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
     networks:
       - app-network
+    # 修正: 使用 mem_limit 替代 deploy.resources
+    mem_limit: 2.5g
 
   redisinsight:
     image: redis/redisinsight:latest
     container_name: redisinsight
+    restart: unless-stopped
     ports:
       - "8001:8001"
     depends_on:
@@ -38,43 +41,46 @@ services:
       - app-network
 
   postgres:
-    image: postgres:18-alpine
+    image: postgres:17-alpine
     container_name: postgres
-    restart: always
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: testdb
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-    ports:
-      - "5432:5432"
+      POSTGRES_DB: $${POSTGRES_DB}
+      POSTGRES_USER: $${POSTGRES_USER}
+      POSTGRES_PASSWORD: $${POSTGRES_PASSWORD}
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      # 新增: 挂载初始化脚本
+      - ./init-debezium-user.sql:/docker-entrypoint-initdb.d/init-debezium-user.sql:ro
+      - ./postgresql.conf:/etc/postgresql/postgresql.conf:ro
     command: >
       postgres
-      -c wal_level=logical
-      -c max_replication_slots=10
-      -c max_wal_senders=10
-      -c wal_keep_size=1024MB
-      -c max_logical_replication_workers=10
+      -c config_file=/etc/postgresql/postgresql.conf
       -c listen_addresses='*'
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user -d testdb"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
       retries: 5
     networks:
       - app-network
+    # 修正: 使用 mem_limit 替代 deploy.resources
+    mem_limit: 4g
 
   debezium:
-    image: debezium/server:3.0.0.Final  # 2026年1月最新稳定版
+    image: debezium/server:3.0.0.Final
     container_name: debezium
-    restart: on-failure
+    restart: on-failure:5
+    # 修正: 暴露 Debezium REST API 端口
+    ports:
+      - "8080:8080"
     volumes:
-      - ./debezium-conf/application.properties:/debezium/conf/application.properties:ro
+      # 修正: 修正配置文件路径以匹配实际文件名
+      - ./application.properties:/debezium/conf/application.properties:ro
       - debezium-data:/debezium/data
     environment:
-      - ENABLE_DEBEZIUM_SCRIPT | true
-      - JAVA_OPTS=-Xmx1g -Xms1g -XX:+UseG1GC
+      JAVA_OPTS: -Xmx1g -Xms1g -XX:+UseG1GC -Djava.security.egd=file:/dev/./urandom
+      DEBEZIUM_REDIS_PASSWORD: $${REDIS_PASSWORD}
     depends_on:
       postgres:
         condition: service_healthy
