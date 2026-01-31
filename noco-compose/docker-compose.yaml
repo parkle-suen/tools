@@ -45,5 +45,5 @@ services:
       - "7004:80"
       - "7005:443" 
     volumes:
-        - ./stacks:/appsmith-stacks
+        - ./data/appsmith:/appsmith-stacks
     restart: unless-stopped
