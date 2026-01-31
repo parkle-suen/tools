@@ -31,7 +31,7 @@ services:
 
   # 4. Lowcoder (Port: 7003) - 低代碼前端
   lowcoder:
-    image: lowcoder/lowcoder:latest
+    image: docker pull docker pull lowcoderorg/lowcoder-ce:latest
     container_name: lowcoder-2026
     ports:
       - "7003:3000"
