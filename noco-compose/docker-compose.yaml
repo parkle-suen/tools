@@ -39,10 +39,11 @@ services:
 
   # 5. Appsmith (Port: 7004) - 專業前端組建
   appsmith:
-    image: appsmith/appsmith-ce:latest
-    container_name: appsmith-2026
+    image: appsmith/appsmith-ce:release
+    container_name: appsmith 
     ports:
       - "7004:80"
+      - "7005:443" 
     volumes:
-      - ./data/appsmith:/appsmith-data
-    restart: always
+        - ./stacks:/appsmith-stacks
+    restart: unless-stopped
