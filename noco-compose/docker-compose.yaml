@@ -1,0 +1,48 @@
+services:
+  # 1. NocoDB (Port: 7000) - 資料庫表格化
+  nocodb:
+    image: nocodb/nocodb:latest
+    container_name: nocodb-2026
+    ports:
+      - "7000:8080"
+    volumes:
+      - ./data/nocodb:/usr/app/data
+    restart: always
+
+  # 2. NocoBase (Port: 7001) - 業務系統框架
+  nocobase:
+    image: nocobase/nocobase:latest
+    container_name: nocobase-2026
+    ports:
+      - "7001:8000"
+    volumes:
+      - ./data/nocobase:/app/nocobase/storage
+    restart: always
+
+  # 3. n8n (Port: 7002) - 工作流與 AI
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n-2026
+    ports:
+      - "7002:5678"
+    volumes:
+      - ./data/n8n:/home/node/.n8n
+    restart: always
+
+  # 4. Lowcoder (Port: 7003) - 低代碼前端
+  lowcoder:
+    image: lowcoder/lowcoder:latest
+    container_name: lowcoder-2026
+    ports:
+      - "7003:3000"
+    restart: always
+
+  # 5. Appsmith (Port: 7004) - 專業前端組建
+  appsmith:
+    image: appsmith/appsmith-ce:latest
+    container_name: appsmith-2026
+    ports:
+      - "7004:80"
+    volumes:
+      - ./data/appsmith:/appsmith-data
+    restart: always
