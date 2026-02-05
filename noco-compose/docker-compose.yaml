@@ -47,3 +47,28 @@ services:
     volumes:
         - ./data/appsmith:/appsmith-stacks
     restart: unless-stopped
+
+# Teable - 全能多維表格 (內建 SQLite 模式)
+  teable:
+    image: teableio/teable:latest
+    container_name: teable-2026
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data/teable:/app/storage
+    environment:
+      - SECRET_KEY=random_str_$(openssl rand -hex 16)
+    restart: always
+
+  # Budibase - 快速 CRUD 平台 (All-in-one 鏡像)
+  budibase:
+    image: budibase/budibase:latest
+    container_name: budibase-2026
+    ports:
+      - "10000:80"
+    volumes:
+      - ./data/budibase:/deploy/data
+    environment:
+      - JWT_SECRET=budibase_local_secret
+      - COUCHDB_PASSWORD=password
+    restart: always
